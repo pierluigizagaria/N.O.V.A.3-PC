@@ -1,0 +1,11 @@
+{
+  "version": "synthetic-v1",
+  "source": "synthetic",
+  "items": [
+    {"id":"test.rifle","kind":"weapon","supported":true,"max_quantity":0},
+    {"id":"test.pistol","kind":"weapon","supported":true,"max_quantity":0},
+    {"id":"test.grenade","kind":"grenade","supported":true,"max_quantity":20},
+    {"id":"test.perk","kind":"perk","supported":true,"max_quantity":0},
+    {"id":"test.unavailable","kind":"weapon","supported":false,"max_quantity":0}
+  ]
+}

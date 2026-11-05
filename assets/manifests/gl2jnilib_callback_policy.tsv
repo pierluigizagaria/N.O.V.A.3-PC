@@ -1,0 +1,54 @@
+# Explicit GL2JNILib policies; maintained by the port, no game code.
+# name	signature	policy
+BrowserLaunch	(Ljava/lang/String;)V	Inert; log once, never open a browser.
+GLLiveLaunch	(II)V	Inert; no account or network action.
+GLLiveNotifyTrophy	(I)V	Inert; no trophy upload.
+GamePause	()V	Native lifecycle entry; defensive logged stub until the frame-loop task.
+GameResume	()V	Native lifecycle entry; defensive logged stub until the frame-loop task.
+GetDeviceFirmware	()Ljava/lang/String;	Return 2.3.7; Build SDK_INT is 9.
+GetDeviceName	()Ljava/lang/String;	Return Nova3PC x86, avoiding model-specific restrictions.
+GetFileFromURL	(Ljava/lang/String;)[B	Return null, logged; no download.
+GetInt	(Ljava/lang/String;I)I	Read MySavedData in the profile; honor the supplied default.
+GetKeyboardText	()[B	Return null, logged; keyboard deferred.
+GetMAC	(I)Ljava/lang/String;	Persistent random locally administered MAC; mode 1 returns its MD5 as Java BigInteger hex.
+GetPhoneCPUCores	()I	Return 4; selects the native multicore CPU tier.
+GetPhoneCPUFreq	()F	Return 2400 MHz; fixed quality profile, not a hardware measurement.
+GetPhoneLanguage	()Ljava/lang/String;	Map Windows UI language, overridden by language in nova3pc.conf.
+GetPhoneMemory	()F	Return 2048 MiB; highest callback-selected memory tier, with the documented MEM_512 limitation.
+GetPhoneModel	()Ljava/lang/String;	Return Nova3PC x86.
+GetSDFolder	()Ljava/lang/String;	Return the mapped Android external app-data path.
+GetUDID	(Z)Ljava/lang/String;	Return the profile's random UUID for either flag value.
+GetWindowHeight	()I	Return 720 before GL.
+GetWindowWidth	()I	Return 1280 before GL; avoid the native 1920-wide CPU-tier override.
+HasGyroscope	()I	Return 0; sensor input deferred.
+IGPLaunch	(I)V	Inert; no ads, billing, or network action.
+Is3gEnabled	()I	Return 0.
+IsAmazonNub	()Z	Return false; no vendor-specific input path.
+IsFirstTimeLaunch	(Ljava/lang/String;)Z	Atomically test MySavedData key (-1 means absent), store 1, return true once.
+IsKeyboardVisible	()I	Return 0; keyboard UI deferred.
+IsNewDay	()Z	Persist last successful check in milliseconds; true once per elapsed 24 hours.
+IsTegra4	()Z	Return true to select GPU_5 through the existing native branch; provisional pending render validation.
+IsWifiEnabled	()I	Return 1 to expose LAN socket capability; no Internet probe.
+KeepScreenOn	(I)V	Logged no-op; window lifecycle deferred.
+PutInt	(Ljava/lang/String;I)V	Atomically persist MySavedData integer.
+SendToBackground	()V	Logged no-op; platform lifecycle deferred.
+SetActionPhase	(I)V	Logged no-op; Android orientation changes are not needed by this probe.
+SetGameState	(I)V	Update process-local game state, initially 1.
+SetKeyboard	(ILjava/lang/String;I)V	Logged no-op; input/UI deferred.
+ShowAlert	(Ljava/lang/String;Ljava/lang/String;)V	Logged no-op; no modal host UI.
+ShowLoadingScreen	(Z)V	Logged no-op; rendering deferred.
+ShowToast	(Ljava/lang/String;)V	Logged no-op.
+TrackAndroidHits	(I)V	Inert; no tracking or network action.
+UseEffectSpec	()I	Return 0; select standard effects.gla, not the Motorola/Kindle/Xperia variant.
+createView	()V	Record surface request; stop before GL.
+enableAccelerometer	(ZF)V	Logged no-op; input deferred.
+enableGyroscope	(ZF)V	Logged no-op; input deferred.
+getResource	(Ljava/lang/String;)[B	Return null, logged; resource and OBB loading deferred.
+resetGyroCalibration	()V	Logged no-op; input deferred.
+resize	(II)V	Native lifecycle entry; defensive logged stub; never invoked by the pre-GL probe.
+setCalibratingGyro	(Z)V	Logged no-op; calibration remains false.
+setCurrentContext	(I)Z	Return false before an EGL context exists.
+setGameLang	(I)V	Store language index for getGameLang; invalid index falls back to English.
+setNoSwapFrames	(I)V	Logged no-op; frame loop deferred.
+setViewSettings	(IIIII)V	Logged no-op; EGL configuration deferred.
+setupPaths	()V	Re-enter native setPaths with OBB, external data, files, cache in original order.

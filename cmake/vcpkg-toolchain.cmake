@@ -1,0 +1,31 @@
+# Keep all writable vcpkg state in the ignored build tree, including when
+# Visual Studio's vcpkg bundle is read-only. Avoid telemetry during builds.
+set(ENV{VCPKG_DISABLE_METRICS} "1")
+foreach(_nova_cache IN ITEMS DOWNLOADS DEFAULT_BINARY_CACHE)
+  if(NOT DEFINED ENV{VCPKG_${_nova_cache}})
+    set(_nova_cache_dir "${CMAKE_CURRENT_LIST_DIR}/../build/vcpkg/${_nova_cache}")
+    get_filename_component(_nova_cache_dir "${_nova_cache_dir}" ABSOLUTE)
+    file(MAKE_DIRECTORY "${_nova_cache_dir}")
+    set(ENV{VCPKG_${_nova_cache}} "${_nova_cache_dir}")
+  endif()
+endforeach()
+if(NOT DEFINED ENV{X_VCPKG_REGISTRIES_CACHE})
+  get_filename_component(_nova_registry "${CMAKE_CURRENT_LIST_DIR}/../build/vcpkg/REGISTRIES_CACHE" ABSOLUTE)
+  file(MAKE_DIRECTORY "${_nova_registry}")
+  set(ENV{X_VCPKG_REGISTRIES_CACHE} "${_nova_registry}")
+endif()
+set(VCPKG_INSTALL_OPTIONS
+  "--x-buildtrees-root=${CMAKE_CURRENT_LIST_DIR}/../build/vcpkg/buildtrees"
+  "--x-packages-root=${CMAKE_CURRENT_LIST_DIR}/../build/vcpkg/packages")
+# Prefer the explicitly selected installation, then Visual Studio's bundle.
+if(DEFINED ENV{VCPKG_ROOT} AND NOT "$ENV{VCPKG_ROOT}" STREQUAL "")
+  file(TO_CMAKE_PATH "$ENV{VCPKG_ROOT}" _nova_vcpkg_root)
+elseif(CMAKE_GENERATOR_INSTANCE AND EXISTS "${CMAKE_GENERATOR_INSTANCE}/VC/vcpkg/scripts/buildsystems/vcpkg.cmake")
+  set(_nova_vcpkg_root "${CMAKE_GENERATOR_INSTANCE}/VC/vcpkg")
+else()
+  set(_nova_vcpkg_root "C:/Program Files/Microsoft Visual Studio/18/Community/VC/vcpkg")
+endif()
+if(NOT EXISTS "${_nova_vcpkg_root}/scripts/buildsystems/vcpkg.cmake")
+  message(FATAL_ERROR "Set VCPKG_ROOT to a vcpkg installation (or install Visual Studio's vcpkg component)")
+endif()
+include("${_nova_vcpkg_root}/scripts/buildsystems/vcpkg.cmake")

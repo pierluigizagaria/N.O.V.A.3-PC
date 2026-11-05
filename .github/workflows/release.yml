@@ -1,0 +1,171 @@
+# Builds the Windows x86 game and launcher, runs the launcher checks and
+# publishes a GitHub Release with the portable ZIP.
+#
+# Start it by pushing a tag (git tag v0.1.0 && git push origin v0.1.0) or from
+# the Actions tab ("Run workflow", with a version such as 0.1.0).
+#
+# Owner-approved branding comes from assets/branding/: the
+# background is packaged when present, icon.png becomes the executables' icon,
+# and logo + icon are packaged together. Missing files are simply skipped.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the leading v (for example 0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Actions cache rejects paths containing '..'. Keep state under ignored build/.
+  # msvc-dev-cmd overwrites VCPKG_ROOT; export our clone after that action.
+  NOVA_VCPKG_ROOT: ${{ github.workspace }}/build/vcpkg-tool
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/build/vcpkg/binary-cache
+  VCPKG_DISABLE_METRICS: '1'
+  LLVM_VERSION: '20.1.8'
+
+jobs:
+  windows-x86:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          $v = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:RELEASE_VERSION } else { $env:RELEASE_REF.TrimStart('v') }
+          if ($v -notmatch '^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$') { throw "Invalid version '$v'" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "tag=v$v" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Catch packaging regressions before spending time compiling dependencies.
+      - name: Package tests
+        run: python tests/test_package.py
+
+      - name: Install CMake 4.2+, Ninja, Pillow and clang-cl ${{ env.LLVM_VERSION }}
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "cmake>=4.2,<5" ninja pillow
+          if ($LASTEXITCODE) { throw "Build tool installation failed" }
+          choco install llvm --version=$env:LLVM_VERSION -y --no-progress
+          if ($LASTEXITCODE) { throw "LLVM installation failed" }
+          "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
+          cmake --version
+
+      - name: x86 MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_x86
+
+      - name: vcpkg (full history for the manifest baseline)
+        id: vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:NOVA_VCPKG_ROOT"
+          if ($LASTEXITCODE) { throw "vcpkg clone failed" }
+          & "$env:NOVA_VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE) { throw "vcpkg bootstrap failed" }
+          "VCPKG_ROOT=$env:NOVA_VCPKG_ROOT" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+          $revision = git -C "$env:NOVA_VCPKG_ROOT" rev-parse HEAD
+          if ($LASTEXITCODE) { throw "Cannot identify vcpkg revision" }
+          $cmakeVersion = cmake --version
+          if ($LASTEXITCODE) { throw "Cannot identify CMake version" }
+          # A changed runner/toolchain can rebuild package ABIs. Give it a new
+          # writable cache key instead of retaining an immutable stale entry.
+          $context = "$env:ImageOS|$env:ImageVersion|$env:VCToolsVersion|$env:WindowsSDKVersion|$env:LLVM_VERSION|$revision|$cmakeVersion"
+          $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($context))).ToLower()
+          "cache-context=$digest" >> $env:GITHUB_OUTPUT
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-ci-release-v1-${{ steps.vcpkg.outputs.cache-context }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'CMakePresets.json', 'cmake/vcpkg-toolchain.cmake', 'cmake/triplets/**', 'cmake/vcpkg-ports/**') }}
+          # vcpkg validates individual package ABIs after a partial match.
+          restore-keys: vcpkg-ci-release-v1-
+
+      - name: Branding
+        id: branding
+        shell: pwsh
+        run: |
+          $dir = 'assets/branding'
+          $background = Test-Path "$dir/background-a.png"
+          $logos = (Test-Path "$dir/logo-original.png") -and (Test-Path "$dir/icon.png")
+          "background=$($background.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "logos=$($logos.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if (Test-Path "$dir/icon.png") { "icon=-DNOVA_ICON_SOURCE=${{ github.workspace }}/$dir/icon.png" >> $env:GITHUB_OUTPUT }
+          else { Write-Host "::notice::assets/branding/icon.png not found; executables get no custom icon and logos are not packaged." }
+
+      - name: Configure
+        run: cmake --preset ci ${{ steps.branding.outputs.icon }}
+
+      # Save completed dependencies even if a later build/test/package step fails.
+      - name: Save vcpkg binary cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      # Native tests include local-only fixtures; keep those in local builds.
+      - name: Build game and launcher
+        run: cmake --build --preset ci --target nova3pc nova3pc-launcher
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $cmd = @('tools/package_release.py', '--build-dir', 'build/ci', '--output', 'dist',
+                    '--name', 'N.O.V.A.3-PC', '--zip')
+          if ('${{ steps.branding.outputs.background }}' -eq 'true') { $cmd += @('--background', 'assets/branding/background-a.png') }
+          else { $cmd += '--no-background' }
+          if ('${{ steps.branding.outputs.logos }}' -eq 'true') { $cmd += @('--with-logos', '--logos-dir', 'assets/branding') }
+          python @cmd
+          if ($LASTEXITCODE) { throw "Release packaging failed" }
+          Rename-Item dist/N.O.V.A.3-PC.zip "N.O.V.A.3-PC-${{ steps.version.outputs.tag }}-win32.zip"
+          Get-FileHash "dist/N.O.V.A.3-PC-${{ steps.version.outputs.tag }}-win32.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: N.O.V.A.3-PC-${{ steps.version.outputs.tag }}-win32
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            dist/N.O.V.A.3-PC-${{ steps.version.outputs.tag }}-win32.zip
+            dist/SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: N.O.V.A. 3 PC ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Portable Windows build. Extract the ZIP anywhere and run **NOVA3.exe**;
+            on first start drag your own N.O.V.A. 3 1.0.7 x86 APK onto the window.
+            No game files are included. See the README for details.
+          files: |
+            dist/N.O.V.A.3-PC-${{ steps.version.outputs.tag }}-win32.zip
+            dist/SHA256SUMS.txt

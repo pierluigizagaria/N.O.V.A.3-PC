@@ -1,0 +1,17 @@
+.text
+.globl _ZNK6glitch5video15CCommonGLDriverINS0_21CProgrammableGLDriverINS0_30CProgrammableShaderHandlerBaseINS0_18CGLSLShaderHandlerEEEEENS0_6detail33CProgrammableGLFunctionPointerSetEE8CTexture16updateParametersEv
+.type _ZNK6glitch5video15CCommonGLDriverINS0_21CProgrammableGLDriverINS0_30CProgrammableShaderHandlerBaseINS0_18CGLSLShaderHandlerEEEEENS0_6detail33CProgrammableGLFunctionPointerSetEE8CTexture16updateParametersEv,@function
+_ZNK6glitch5video15CCommonGLDriverINS0_21CProgrammableGLDriverINS0_30CProgrammableShaderHandlerBaseINS0_18CGLSLShaderHandlerEEEEENS0_6detail33CProgrammableGLFunctionPointerSetEE8CTexture16updateParametersEv:
+    pushl %ebp
+    movl %esp,%ebp
+    andl $-16,%esp
+    subl $16,%esp
+    xorps %xmm0,%xmm0
+    movaps %xmm0,(%esp)
+    movl 8(%ebp),%eax
+    movl %eax,(%esp)
+    call fixture_texture_parameters
+    movl %ebp,%esp
+    popl %ebp
+    ret
+.size _ZNK6glitch5video15CCommonGLDriverINS0_21CProgrammableGLDriverINS0_30CProgrammableShaderHandlerBaseINS0_18CGLSLShaderHandlerEEEEENS0_6detail33CProgrammableGLFunctionPointerSetEE8CTexture16updateParametersEv,.-_ZNK6glitch5video15CCommonGLDriverINS0_21CProgrammableGLDriverINS0_30CProgrammableShaderHandlerBaseINS0_18CGLSLShaderHandlerEEEEENS0_6detail33CProgrammableGLFunctionPointerSetEE8CTexture16updateParametersEv

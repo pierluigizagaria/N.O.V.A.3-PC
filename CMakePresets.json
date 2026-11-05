@@ -1,0 +1,81 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 4,
+    "minor": 2,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "win32",
+      "displayName": "Windows x86 / ClangCL / vcpkg",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "Win32",
+      "toolset": "ClangCL",
+      "binaryDir": "${sourceDir}/build/win32",
+      "toolchainFile": "${sourceDir}/cmake/vcpkg-toolchain.cmake",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x86-windows",
+        "BUILD_TESTING": true
+      }
+    },
+    {
+      "name": "ci",
+      "displayName": "CI: Windows x86 / clang-cl / Ninja / vcpkg (Release)",
+      "description": "Used by .github/workflows/release.yml inside an x86 MSVC developer environment.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ci",
+      "toolchainFile": "${sourceDir}/cmake/vcpkg-toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_C_COMPILER_TARGET": "i686-pc-windows-msvc",
+        "CMAKE_CXX_COMPILER_TARGET": "i686-pc-windows-msvc",
+        "VCPKG_TARGET_TRIPLET": "x86-windows-release",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets",
+        "BUILD_TESTING": false
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "win32",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "win32",
+      "configuration": "Release"
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "win32",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "win32",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ]
+}

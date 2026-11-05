@@ -1,0 +1,101 @@
+# Game inputs, extracted assets/artwork/fonts, analysis dumps and local runs.
+# Keep all original-game material under local/, including launcher artwork.
+local/
+*.[aA][pP][kK]
+*.[oO][bB][bB]
+*.[sS][oO]
+*.[dD][eE][xX]
+
+# CMake / Visual Studio / Ninja build outputs
+build/
+build-*/
+cmake-build-*/
+out/
+dist/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+compile_commands.json
+*.exe
+*.dll
+*.obj
+*.o
+*.lib
+*.a
+*.pdb
+*.ilk
+*.exp
+*.pch
+*.idb
+*.tlog/
+*.lastbuildstate
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.slnx
+
+# Downloaded vcpkg dependencies and package/build caches (keep port sources)
+vcpkg_installed/
+/vcpkg/
+
+# Python tooling and local virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Backend binaries, coverage and persistent local state
+/server/bin/
+/server/nova-server
+*.test
+coverage.out
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Runtime logs, crash dumps and machine-local secrets
+*.log
+*.dmp
+*.mdmp
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Editor and operating-system state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Private development documentation stays on this machine.
+/docs/
+/tasks/
+AGENTS.md
+DOMANDE_CODEX*.md
+/server/README.md
+/server/internal/**/*.md
+/tests/*.md

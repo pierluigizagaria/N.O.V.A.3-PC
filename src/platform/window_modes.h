@@ -45,6 +45,7 @@ struct WindowModeApi {
     decltype(&SDL_SetWindowPosition) move=&SDL_SetWindowPosition;
     decltype(&SDL_SetWindowSize) resize=&SDL_SetWindowSize;
     decltype(&SDL_SyncWindow) sync=&SDL_SyncWindow;
+    decltype(&SDL_ShowWindow) show=&SDL_ShowWindow;
     decltype(&SDL_GetDisplayForWindow) display=&SDL_GetDisplayForWindow;
     decltype(&SDL_GetFullscreenDisplayModes) modes=&SDL_GetFullscreenDisplayModes;
     decltype(&SDL_GetDesktopDisplayMode) desktop=&SDL_GetDesktopDisplayMode;
@@ -87,6 +88,8 @@ class WindowModes {
     WindowModeRoute apply(DisplaySettings);
     // Startup invalid/removed-display choices fall back without rewriting config.
     WindowModeRoute startup(DisplaySettings);
+    // Finish SDL's deferred hidden-window mode change, then verify it visibly.
+    WindowModeRoute reveal();
 
   private:
     struct Placement { int x=0,y=0,width=0,height=0; float scale=1; } normal_;

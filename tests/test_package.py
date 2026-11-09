@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import package_release  # noqa: E402
+import release  # noqa: E402
 
 
 def fake_pe(path, machine=0x14c):
@@ -47,7 +48,7 @@ class PackageTests(unittest.TestCase):
         names = sorted(p.relative_to(target).as_posix() for p in target.rglob('*') if p.is_file())
         self.assertEqual(names, ['LEGGIMI - README.txt', 'NOVA3-Game.exe', 'NOVA3.exe', 'SDL3.dll',
                                  'SHA256SUMS.txt', 'libEGL.dll', 'libGLESv2.dll',
-                                 'local/launcher/background-a.png', 'zlib1.dll'])
+                                 'local/launcher/background-a.png', 'server.conf', 'zlib1.dll'])
         sums = (target / 'SHA256SUMS.txt').read_text()
         self.assertIn('NOVA3.exe', sums)
         with zipfile.ZipFile(archive) as packed:
@@ -99,9 +100,9 @@ class PackageTests(unittest.TestCase):
             (art / logo).write_bytes(b'\x89PNG\r\n\x1a\nsynthetic')
         (art / 'neuropol.ttf').write_bytes(b'not packaged')
         target, _ = self.run_package(make_zip=False)
-        self.assertFalse((target / 'local/launcher/logo-original.png').exists())
+        self.assertFalse((target / 'local/launcher/logo-pc.png').exists())
         target, _ = self.run_package(make_zip=False, logos=art)
-        self.assertTrue((target / 'local/launcher/logo-original.png').is_file())
+        self.assertTrue((target / 'local/launcher/logo-pc.png').is_file())
         self.assertTrue((target / 'local/launcher/icon.png').is_file())
         self.assertFalse((target / 'local/launcher/neuropol.ttf').exists())
         (art / 'icon.png').unlink()
@@ -111,6 +112,35 @@ class PackageTests(unittest.TestCase):
     def test_without_background(self):
         target, _ = self.run_package(background=None, make_zip=False)
         self.assertFalse((target / 'local').exists())
+
+    def test_release_branding_fallback_and_missing_icon(self):
+        local = self.base / 'local-art'
+        approved = self.base / 'approved-art'
+        local.mkdir()
+        approved.mkdir()
+        for name in ('background-a.png', *package_release.LOGOS):
+            (approved / name).write_bytes(b'approved synthetic PNG')
+        (local / 'logo-pc.png').write_bytes(b'incomplete local artwork')
+        background, logos = release.branding(local, approved)
+        self.assertEqual(background, approved / 'background-a.png')
+        self.assertEqual(logos, approved)
+        target, _ = self.run_package(background=background, logos=logos)
+        self.assertEqual((target / 'local/launcher/logo-pc.png').read_bytes(),
+                         (approved / 'logo-pc.png').read_bytes())
+        (approved / 'icon.png').unlink()
+        with self.assertRaisesRegex(SystemExit, 'missing original logo/icon'):
+            release.branding(local, approved)
+        self.assertIsNone(release.branding(local, approved, with_logos=False)[1])
+
+    def test_server_configuration_uses_only_public_offline_template(self):
+        (self.build / 'server.conf').write_text('mode=remote\naddress=private\nsecret=do-not-ship\n')
+        target, archive = self.run_package()
+        template = (package_release.ROOT / 'assets/server.conf').read_bytes()
+        self.assertEqual((target / 'server.conf').read_bytes(), template)
+        active = [line for line in template.decode().splitlines() if line and not line.startswith('#')]
+        self.assertEqual(active, ['mode = offline'])
+        with zipfile.ZipFile(archive) as packed:
+            self.assertEqual(packed.read('N.O.V.A.3-PC/server.conf'), template)
 
     def test_repackaging_replaces_previous_folder(self):
         target, _ = self.run_package(make_zip=False)

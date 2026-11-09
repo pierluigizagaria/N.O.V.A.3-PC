@@ -3,11 +3,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from isolated_runtime import isolated_executable
 
 mode, executable, fixture, root = sys.argv[1:]
 root = Path(root)
 root.mkdir(parents=True, exist_ok=True)
-with tempfile.TemporaryDirectory(prefix="audio-", dir=root) as work:
+with isolated_executable(executable, root) as executable, \
+        tempfile.TemporaryDirectory(prefix="audio-", dir=root) as work:
     if mode == "trap":
         result = subprocess.run([executable, fixture, "trap", work], capture_output=True, text=True, timeout=10)
         assert result.returncode == 70, result.stdout + result.stderr

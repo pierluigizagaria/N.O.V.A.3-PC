@@ -37,4 +37,16 @@ class GuestCall {
     uint32_t target_ = 0, original_ = 0;
     uint8_t saved_[5]{};
 };
+// Enter a host scope at a checked position-independent MOV checkpoint. Preserve
+// flags, general registers, x87 and SSE state before replaying the instruction.
+class GuestCheckpoint {
+public:
+    GuestCheckpoint(const ElfImage&,const std::string& owner,uint32_t offset,
+                    std::initializer_list<uint8_t> expected,uint32_t callback);
+    ~GuestCheckpoint();
+    GuestCheckpoint(const GuestCheckpoint&)=delete;
+private:
+    uint32_t target_=0,bridge_=0;
+    std::vector<uint8_t> saved_;
+};
 }

@@ -1,5 +1,16 @@
 /* Synthetic JNI input receiver; no game bytes or implementation. */
 typedef unsigned int u32;
+/* Synthetic selection API: sparse IDs and native-sized widget storage. */
+void selection_special_set(u32 *button,u32 id) {
+    u32 *begin=(u32 *)button[0x84/4], *end=(u32 *)button[0x88/4];
+    for(u32 i=0;begin+i*11<end;++i) if(begin[i*11+6]==id) { button[0xa4/4]=i;return; }
+}
+void selection_grenade_set(u32 *button,u32 id) {
+    u32 *begin=(u32 *)button[0x98/4], *end=(u32 *)button[0x9c/4];
+    for(u32 i=0;begin+i<end;++i) if(begin[i]==id) { button[0xb4/4]=i;return; }
+}
+u32 selection_calls,selection_id;
+void selection_callback(u32 *button,u32 id) { (void)button;++selection_calls;selection_id=id; }
 struct env {
     u32 *slots;
 };

@@ -1,10 +1,11 @@
 param(
     [ValidateSet('test','build','format','vet')][string]$Action = 'test',
-    [switch]$Restore
+    [switch]$Restore,
+    [ValidateSet('Release','Debug')][string]$Configuration = 'Release'
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$receipt = Join-Path $repoRoot 'local/logs/sv03/toolchain.json'
+$receipt = Join-Path $repoRoot 'local/tools/go-toolchain.json'
 $goTool = if (Test-Path -LiteralPath $receipt) {
     (Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json).go
 } else {
@@ -26,14 +27,16 @@ if ($Restore) {
 }
 $env:GOPROXY = 'off'
 $env:GOSUMDB = 'off'
+[string[]]$buildTags = @()
+if ($Configuration -eq 'Debug') { $buildTags += '-tags=debug' }
 switch ($Action) {
     'format' { & $goTool -C $PSScriptRoot fmt ./... }
-    'test' { & $goTool -C $PSScriptRoot test -count=1 ./... }
-    'vet' { & $goTool -C $PSScriptRoot vet ./... }
+    'test' { & $goTool -C $PSScriptRoot test @buildTags -count=1 ./... }
+    'vet' { & $goTool -C $PSScriptRoot vet @buildTags ./... }
     'build' {
-        $output = Join-Path $repoRoot 'local/server/bin/nova-server.exe'
+        $output = Join-Path $repoRoot $(if ($Configuration -eq 'Debug') { 'local/server/debug/nova-server.exe' } else { 'local/server/bin/nova-server.exe' })
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
-        & $goTool -C $PSScriptRoot build -trimpath -o $output ./cmd/nova-server
+        & $goTool -C $PSScriptRoot build @buildTags -trimpath -o $output ./cmd/nova-server
     }
 }
 if ($LASTEXITCODE -ne 0) { throw "Go $Action failed" }

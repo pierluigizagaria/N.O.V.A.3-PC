@@ -1,3 +1,4 @@
+#include "platform/build_interface.h"
 #include <cstdlib>
 #include "bionic/descriptors.h"
 #include "net/network.h"
@@ -233,7 +234,7 @@ struct Directory {
     Dirent current{};
 };
 Directory *__cdecl directory_open(const char *p) {
-    if (std::getenv("NOVA_TRACE_FILES"))
+    if (nova::build_interface::developer && std::getenv("NOVA_TRACE_FILES") != nullptr)
         log_once(std::string("opendir path=") + (p ? p : "<null>"));
     auto path = map_path(p);
     if (path.empty())
@@ -269,7 +270,7 @@ Dirent *__cdecl directory_read(Directory *d) {
     if (d->index == d->entries.size())
         return nullptr;
     const auto &e = d->entries[d->index++];
-    if (std::getenv("NOVA_TRACE_FILES"))
+    if (nova::build_interface::developer && std::getenv("NOVA_TRACE_FILES") != nullptr)
         log_once("readdir name=" + e.first + " type=" + std::to_string(e.second));
     d->current = {};
     d->current.ino = d->index;
@@ -323,7 +324,7 @@ HANDLE duplicate_read_file(int fd) {
     return result;
 }
 int __cdecl file_open(const char *p, int flags, ...) {
-    static const bool trace = std::getenv("NOVA_TRACE_FILES") != nullptr;
+    static const bool trace = (nova::build_interface::developer ? std::getenv("NOVA_TRACE_FILES") : nullptr) != nullptr;
     if (trace)
         log_once("open flags=" + std::to_string(flags) + " path=" + (p ? p : "<null>"));
     const int access = flags & 3;

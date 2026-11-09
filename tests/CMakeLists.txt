@@ -33,11 +33,13 @@ if(NOT NOVA_LLVM_BIN)
   endif()
 endif()
 set(FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+include(startup.cmake)
 include(dialog-escape.cmake)
 include(communications.cmake)
 include(native-detail.cmake)
 include(texture-filtering.cmake)
 include(lan-a.cmake)
+include(local-shop.cmake)
 include(interface-ioctl.cmake)
 set(FIXTURES "${FIXTURE_DIR}/loader.so" "${FIXTURE_DIR}/bionic.so" "${FIXTURE_DIR}/platform.so" "${FIXTURE_DIR}/media.so" "${FIXTURE_DIR}/input.so" "${FIXTURE_DIR}/world_fov.so")
 foreach(name bad_relocation bad_target bad_symbol wx arm truncated stripped)
@@ -66,7 +68,7 @@ target_compile_options(stack-tests PRIVATE /W4 /WX /EHsc)
 add_dependencies(stack-tests stack_fixture)
 add_test(NAME runtime-stack-commit COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/check_stack.py" "$<TARGET_FILE:stack-tests>"
-  "${STACK_FIXTURE}" "${PROJECT_SOURCE_DIR}/local/test-profiles/b03-stack-$<CONFIG>")
+  "${STACK_FIXTURE}" "${CMAKE_CURRENT_BINARY_DIR}/runtime/b03-stack-$<CONFIG>")
 set_tests_properties(runtime-stack-commit PROPERTIES TIMEOUT 60)
 add_executable(loader-tests loader_tests.cpp)
 target_link_libraries(loader-tests PRIVATE nova_runtime)
@@ -143,12 +145,12 @@ foreach(area allocator tmpnam stdio format files threads misc jni jni_threads)
 endforeach()
 
 if(NOVA_REAL_TESTS)
-  add_test(NAME boot-real COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/check_boot.py" $<TARGET_FILE:nova3pc-boot> "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so" "${PROJECT_SOURCE_DIR}/local/test-profiles/$<CONFIG>")
+  add_test(NAME boot-real COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/check_boot.py" $<TARGET_FILE:nova3pc-boot> "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so" "${CMAKE_CURRENT_BINARY_DIR}/runtime/$<CONFIG>")
   set_tests_properties(boot-real PROPERTIES SKIP_RETURN_CODE 77 LABELS "real;opt-in" TIMEOUT 60)
   add_test(NAME boot-policy-cache-real COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/check_boot_policy.py" $<TARGET_FILE:nova3pc-boot>
     "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so"
-    "${PROJECT_SOURCE_DIR}/local/test-profiles/l02-$<CONFIG>")
+    "${CMAKE_CURRENT_BINARY_DIR}/runtime/l02-$<CONFIG>")
   set_tests_properties(boot-policy-cache-real PROPERTIES SKIP_RETURN_CODE 77 LABELS "real;opt-in" TIMEOUT 60)
 endif()
 
@@ -202,9 +204,9 @@ foreach(area t04 formats lifecycle removed physical-removed volume fallback slow
 endforeach()
 
 add_test(NAME audio-trap COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/check_audio.py"
-  trap $<TARGET_FILE:audio-tests> "${FIXTURE_DIR}/media.so" "${PROJECT_SOURCE_DIR}/local/test-profiles/$<CONFIG>/audio-trap")
-add_test(NAME audio-preflight-cli COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/check_audio.py"
-  preflight $<TARGET_FILE:nova3pc> unused "${PROJECT_SOURCE_DIR}/local/test-profiles/$<CONFIG>/audio-preflight")
+  trap $<TARGET_FILE:audio-tests> "${FIXTURE_DIR}/media.so" "${CMAKE_CURRENT_BINARY_DIR}/runtime/$<CONFIG>/audio-trap")
+add_test(NAME audio-preflight-cli CONFIGURATIONS Debug COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/check_audio.py"
+  preflight $<TARGET_FILE:nova3pc> unused "${CMAKE_CURRENT_BINARY_DIR}/runtime/$<CONFIG>/audio-preflight")
 set_tests_properties(audio-trap audio-preflight-cli PROPERTIES TIMEOUT 20 WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
 
 add_executable(input-tests input_tests.cpp)
@@ -231,6 +233,16 @@ add_test(NAME fov-panel-render COMMAND fov-panel-tests render
 set_tests_properties(fov-config-synthetic fov-panel-policy fov-panel-render PROPERTIES TIMEOUT 60)
 
 add_executable(controls-tests controls_tests.cpp)
+add_executable(power-selection-tests power_selection_tests.cpp)
+target_link_libraries(power-selection-tests PRIVATE nova_media)
+target_compile_options(power-selection-tests PRIVATE /W4 /WX /EHsc)
+add_dependencies(power-selection-tests elf_fixtures)
+add_test(NAME input-power-selection COMMAND power-selection-tests "${FIXTURE_DIR}/input.so" --synthetic)
+set_tests_properties(input-power-selection PROPERTIES TIMEOUT 20)
+if(NOVA_REAL_TESTS)
+  add_test(NAME input-power-selection-real COMMAND power-selection-tests "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so" --real)
+  set_tests_properties(input-power-selection-real PROPERTIES SKIP_RETURN_CODE 77 LABELS "real;opt-in" TIMEOUT 20)
+endif()
 target_link_libraries(controls-tests PRIVATE nova_media)
 target_compile_options(controls-tests PRIVATE /W4 /WX /EHsc)
 add_dependencies(controls-tests elf_fixtures)
@@ -368,8 +380,7 @@ include(rigid-draw-activation.cmake)
 include(menu_ack.cmake)
 
 
-# Local-only O08h5 route (gitignored work tree); absent in clean clones and CI.
-include("${PROJECT_SOURCE_DIR}/local/work/o08-wobble/post-rejection-recovery/source-v2/o08h5-enabled-route.cmake" OPTIONAL)
+
 
 include(initial_target_scaling.cmake)
 
@@ -385,3 +396,27 @@ add_test(NAME camera-view-bob COMMAND camera-view-tests)
 include(ui-scale.cmake)
 include(menu-fonts.cmake)
 include(sprite-selection.cmake)
+
+add_executable(pc-snapshot-tests pc_snapshot_tests.cpp)
+target_include_directories(pc-snapshot-tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_options(pc-snapshot-tests PRIVATE /W4 /WX /EHsc)
+add_test(NAME pc-snapshot-contract COMMAND pc-snapshot-tests)
+
+add_test(NAME technical-world-data COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_world_data.py")
+add_test(NAME technical-authority-data COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_authority_data.py")
+add_test(NAME technical-animation-timing COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_animation_metadata.py")
+add_test(NAME technical-hitbox-animation COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_hitbox_metadata.py")
+set_tests_properties(technical-authority-data technical-animation-timing technical-hitbox-animation PROPERTIES TIMEOUT 90)
+add_executable(native-world-reader-tests native_world_reader_tests.cpp)
+target_link_libraries(native-world-reader-tests PRIVATE nova_runtime)
+target_compile_options(native-world-reader-tests PRIVATE /W4 /WX /EHsc)
+add_test(NAME native-world-readers-original COMMAND native-world-reader-tests
+  "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so")
+set_tests_properties(native-world-readers-original PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+
+add_test(NAME local-layout-guard COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/check_local_layout.py")
+add_test(NAME local-layout-unit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_local_layout.py")

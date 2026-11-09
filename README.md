@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Play N.O.V.A. 3 natively on Windows, with keyboard and mouse.</b><br>
-  Unofficial PC port of Gameloft's <i>N.O.V.A. 3 – Near Orbit Vanguard Alliance</i> (Android 1.0.7).
+  Unofficial PC port of Gameloft's <i>N.O.V.A. 3 â€“ Near Orbit Vanguard Alliance</i> (Android 1.0.7).
 </p>
 
 <p align="center">
@@ -29,19 +29,19 @@ everything locally.
 
 ## Highlights
 
-- **One-click start** – a guided first-run launcher: drag your APK onto the
+- **One-click start** â€“ a guided first-run launcher: drag your APK onto the
   window, wait for the progress bar, play. Later starts open the game directly.
-- **Real PC controls** – mouse look, WASD, remappable keys, sprint, grenades,
+- **Real PC controls** â€“ mouse look, WASD, remappable keys, sprint, grenades,
   vehicles and mechs. Gamepad support is experimental.
-- **Modern display options** – resizable window, borderless fullscreen
+- **Modern display options** â€“ resizable window, borderless fullscreen
   (Alt+Enter), field-of-view controls, higher detail distance, anisotropic
   filtering and HD interface artwork.
-- **Faithful** – the original game logic, campaign and multiplayer protocol
+- **Faithful** â€“ the original game logic, campaign and multiplayer protocol
   are untouched; your saves and settings are preserved.
-- **Private by design** – everything stays on your PC; Gameloft servers are
+- **Private by design** â€“ everything stays on your PC; Gameloft servers are
   blocked by default.
-- **Six launcher languages** – English, Italiano, Français, Deutsch, Español,
-  Português. Picked from Windows, switchable in the launcher's corner.
+- **Six launcher languages** â€“ English, Italiano, FranÃ§ais, Deutsch, EspaÃ±ol,
+  PortuguÃªs. Picked from Windows, switchable in the launcher's corner.
 
 ## Quick start
 
@@ -52,9 +52,7 @@ everything locally.
    **Select APK**. If the game data (main/patch OBB) is not next to the APK,
    the launcher asks for the data ZIP or one of the OBB files.
 4. Files are verified and extracted into the `local` folder. The game then
-   starts by itself – and every later start goes straight into the game.
-
-Need to change files later? Run `NOVA3.exe --setup`.
+   starts by itself â€“ and every later start goes straight into the game.
 
 | File | What it does |
 |---|---|
@@ -62,19 +60,12 @@ Need to change files later? Run `NOVA3.exe --setup`.
 | `NOVA3-Game.exe` | The game itself, started by the launcher (double-clicking it opens the launcher). |
 | `local\` | Your imported game data, settings, saves and logs. Keep it when updating. |
 
-## Default controls
+## Community multiplayer
 
-| Input | Action |
-|---|---|
-| Mouse | Look · left: fire · right: aim |
-| W A S D · Shift | Move · sprint |
-| Space · R · G | Jump · reload · grenade / power |
-| E · F · Q | Interact · melee · special power |
-| 1–5 · wheel | Weapon slots · next / previous weapon |
-| Hold V · hold Tab | Voice lines · scoreboard (multiplayer) |
-| Esc · Alt+Enter | Pause / back · borderless fullscreen |
-
-All keys are remappable in **Settings > Controls**.
+Community multiplayer uses an independently operated dedicated server and is
+under active development. Use the connection details supplied by your server
+operator. Game files are imported locally; official Gameloft services remain
+blocked by default.
 
 ## Legal
 

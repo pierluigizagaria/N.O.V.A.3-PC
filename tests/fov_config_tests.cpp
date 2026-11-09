@@ -72,10 +72,10 @@ int main(int argc,char **argv) {
         config_path=directory/"nova3pc.conf";
         const FovOptions pair{std::bit_cast<float>(0x42b40001u),104.f};
         const std::string original="# untouched\r\nlanguage = en\r\n world_fov\t= native  \r\n"
-            "world_fov = 70\nweapon_fov=100\r\nhosts.local = 127.0.0.1";
+            "world_fov = 70\nweapon_fov=100\r\naudio = null";
         auto merged=merge_fov_config(original,pair);
         check(merged.find("# untouched\r\nlanguage = en\r\n")==0,"unrelated bytes and CRLF exact");
-        check(merged.find("hosts.local = 127.0.0.1")!=std::string::npos,"last unrelated unterminated line exact");
+        check(merged.find("audio = null")!=std::string::npos,"last unrelated unterminated line exact");
         check(merged.find("native")==std::string::npos && merged.find("world_fov = 70")==std::string::npos,
               "all duplicate FOV occurrences replaced");
         write(config_path,merged);

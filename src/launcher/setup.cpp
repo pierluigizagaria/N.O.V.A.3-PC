@@ -207,7 +207,11 @@ public:
                 stream.next_out=decoded.data(); stream.avail_out=static_cast<uInt>(decoded.size());
                 const auto result=inflate(&stream,Z_NO_FLUSH);
                 const auto produced=decoded.size()-stream.avail_out;
-                if(result!=Z_OK && result!=Z_STREAM_END) fail("Corrupt compressed ZIP member.");
+                // Both buffers may end together at a non-final block boundary.
+                // With no input left, zlib needs the next chunk, not a repair.
+                // The final size/CRC/end-of-stream checks still reject truncation.
+                if(result==Z_BUF_ERROR && !stream.avail_in && !produced) break;
+                if(result!=Z_OK && result!=Z_STREAM_END) fail("Corrupt compressed ZIP member: "+entry.name);
                 emit(decoded.data(),produced);
                 if(result==Z_STREAM_END) {
                     if(stream.avail_in || consumed!=entry.packed) fail("Trailing compressed ZIP data.");

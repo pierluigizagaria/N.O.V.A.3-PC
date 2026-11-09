@@ -1,10 +1,10 @@
-// Package accounts provides local test identities and revocable opaque sessions.
-// Session issuance is an administrative operation, not public login.
+// Package accounts provides community identities and revocable opaque sessions.
 package accounts
 
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -74,5 +74,33 @@ func ResolveWith(q persistence.Querier, token string) (string, error) {
 }
 func Revoke(s *persistence.Store, token string) error {
 	_, err := s.DB.Exec("DELETE FROM sessions WHERE hash=?", hash(token))
+	return err
+}
+
+// Refresh extends only a still-valid credential; it cannot resurrect a revoked
+// or expired login. The caller has already authenticated the native keepalive.
+func Refresh(s *persistence.Store, token string, ttl time.Duration) error {
+	return RefreshWith(s.DB, token, ttl)
+}
+
+func RefreshWith(q interface {
+	Exec(string, ...any) (sql.Result, error)
+}, token string, ttl time.Duration) error {
+	if len(token) != 64 || ttl < time.Second || ttl > 24*time.Hour {
+		return errors.New("invalid session renewal")
+	}
+	now := time.Now()
+	result, err := q.Exec("UPDATE sessions SET expires=? WHERE hash=? AND expires>?", now.Add(ttl).Unix(), hash(token), now.Unix())
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return errors.New("session expired or revoked")
+	}
+	return nil
+}
+
+func RevokeAccount(s *persistence.Store, account string) error {
+	_, err := s.DB.Exec("DELETE FROM sessions WHERE account=?", account)
 	return err
 }

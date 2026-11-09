@@ -1,3 +1,4 @@
+#include "platform/build_interface.h"
 #include "launcher/setup.h"
 #include "launcher/process.h"
 #include "launcher/language.h"
@@ -23,11 +24,10 @@
 namespace {
 using namespace nova::launcher;
 constexpr UINT notice=WM_APP+1,finished=WM_APP+2;
-constexpr UINT_PTR hover_timer=1;
 struct App {
     HWND window=nullptr,log=nullptr,select=nullptr,retry=nullptr,languages[language_count]{};
-    int dpi=96,width=canvas_width,height=canvas_height,hover=0,pressed=0;
-    bool focus_cues=true,data_ready=false;
+    int dpi=96,width=canvas_width,height=canvas_height,hover=0;
+    bool data_ready=false;
     Language language=system_language();
     Skin skin;
     Layout layout; fs::path executable,launcher,apk,data;
@@ -55,11 +55,40 @@ struct App {
         result.want_data=wanted==RequiredInput::data;
         result.apk_name=apk.filename().wstring();result.data_name=data.filename().wstring();
         result.error=error;result.retry=error;result.focused=GetDlgCtrlID(GetFocus());
-        result.hover=hover;result.pressed=pressed;result.focus_cues=focus_cues;
+        result.hover=hover;
+        const auto capture=GetCapture();
+        if(capture && GetParent(capture)==window && (SendMessageW(capture,BM_GETSTATE,0,0)&BST_PUSHED))
+            result.pressed=GetDlgCtrlID(capture);
+        result.focus_cues=!(SendMessageW(window,WM_QUERYUISTATE,0,0)&UISF_HIDEFOCUS);
         const auto end=visible_log.size()-std::min(scroll_back,visible_log.size());
         result.log.assign(visible_log.begin(),visible_log.begin()+end);return result;
     }
 };
+void set_hover(App &a,int id) {
+    if(a.hover==id)return;
+    const int previous=a.hover;a.hover=id;
+    // Invalidate only the two affected controls, never every child while
+    // Windows is negotiating the cursor or painting a different button.
+    if(previous)if(const auto control=GetDlgItem(a.window,previous))InvalidateRect(control,nullptr,FALSE);
+    if(id)if(const auto control=GetDlgItem(a.window,id))InvalidateRect(control,nullptr,FALSE);
+}
+LRESULT CALLBACK button_pointer(HWND control,UINT message,WPARAM wparam,LPARAM lparam,
+                                UINT_PTR,DWORD_PTR reference) {
+    auto &a=*reinterpret_cast<App *>(reference);
+    const int id=GetDlgCtrlID(control);
+    // The complete themed background comes from our cached parent frame.
+    // Native button erasure would flash the default fill before each copy.
+    if(message==WM_ERASEBKGND)return 1;
+    if(message==WM_MOUSEMOVE && IsWindowEnabled(control)) {
+        if(a.hover!=id) {
+            set_hover(a,id);
+            TRACKMOUSEEVENT track{sizeof(track),TME_LEAVE,control,0};TrackMouseEvent(&track);
+        }
+    } else if(message==WM_MOUSELEAVE || message==WM_ENABLE || message==WM_NCDESTROY) {
+        if(a.hover==id)set_hover(a,0);
+    }
+    return DefSubclassProc(control,message,wparam,lparam);
+}
 std::wstring widen(const std::string &s) {
     if(s.empty())return {};
     const auto n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);
@@ -184,8 +213,11 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
     switch(message) {
     case WM_CREATE: {
         auto button=[&](const wchar_t *name,int id) {
-            return CreateWindowW(L"BUTTON",name,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
+            const auto control=CreateWindowW(L"BUTTON",name,WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
                 0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),nullptr,nullptr);
+            if(!control || !SetWindowSubclass(control,button_pointer,1,reinterpret_cast<DWORD_PTR>(a)))
+                throw std::runtime_error("Cannot create launcher button.");
+            return control;
         };
         a->select=button(a->label(Text::select_apk),select_id); a->retry=button(a->label(Text::retry),retry_id);
         for(int i=0;i<language_count;++i)
@@ -209,33 +241,18 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
     case WM_PAINT: { PAINTSTRUCT p{}; auto dc=BeginPaint(window,&p); paint(*a,dc); EndPaint(window,&p); return 0; }
     case WM_DRAWITEM: {
         auto item=reinterpret_cast<DRAWITEMSTRUCT *>(lparam);POINT origin{};
-        a->pressed=(item->itemState&ODS_SELECTED)?static_cast<int>(item->CtlID):0;
-        a->focus_cues=!(item->itemState&ODS_NOFOCUSRECT);
+        auto state=a->state();
+        if(item->itemState&ODS_SELECTED)state.pressed=static_cast<int>(item->CtlID);
         MapWindowPoints(item->hwndItem,window,&origin,1);
-        a->skin.draw(item->hDC,a->width,a->height,a->state(),origin.x,origin.y);return TRUE;
+        a->skin.draw_control(item->hDC,a->width,a->height,state,origin,item->rcItem);return TRUE;
     }
     case WM_SETCURSOR: {
         // DefWindowProc of each child asks the parent first, so this sees every button.
         const auto over=reinterpret_cast<HWND>(wparam);
         const int id=over!=window&&IsWindowEnabled(over)?GetDlgCtrlID(over):0;
-        if(id!=a->hover) {
-            a->hover=id; RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);
-            if(id)SetTimer(window,hover_timer,80,nullptr);
-        }
-        if(id){SetCursor(LoadCursorW(nullptr,MAKEINTRESOURCEW(32649)));return TRUE;}
+        if(id && LOWORD(lparam)==HTCLIENT){SetCursor(LoadCursorW(nullptr,MAKEINTRESOURCEW(32649)));return TRUE;}
         break;
     }
-    case WM_TIMER:
-        if(wparam==hover_timer) {
-            POINT cursor{}; GetCursorPos(&cursor);
-            const auto over=WindowFromPoint(cursor);
-            if(!a->hover || !over || GetDlgCtrlID(over)!=a->hover || GetParent(over)!=window) {
-                KillTimer(window,hover_timer);
-                if(a->hover){a->hover=0;RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);}
-            }
-            return 0;
-        }
-        break;
     case WM_DROPFILES: {
         const auto drop=reinterpret_cast<HDROP>(wparam);
         std::wstring name(32768,L'\0');
@@ -268,6 +285,9 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
     }
     case finished: finish(*a); return 0;
     case WM_COMMAND:
+        // Focus/hot-state notifications are not clicks and must never relayout
+        // the language picker or start preparation.
+        if(HIWORD(wparam)!=BN_CLICKED)break;
         // No Cancel button: the caption close button or Escape closes (and safely stops setup).
         if(LOWORD(wparam)==IDCANCEL) { SendMessageW(window,WM_CLOSE,0,0); return 0; }
         if(LOWORD(wparam)==retry_id) { start(*a); return 0; }
@@ -303,6 +323,15 @@ int wait_game(HANDLE game,Language language) {
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
+    if (!nova::build_interface::launcher_option(command)) {
+        MessageBoxW(nullptr, L"Unsupported launcher option. Use --help for available options.",
+                    L"N.O.V.A. 3", MB_OK | MB_ICONERROR);
+        return 2;
+    }
+    if (std::wstring_view(command) == L"--help") {
+        MessageBoxW(nullptr, nova::build_interface::launcher_help, L"N.O.V.A. 3", MB_OK);
+        return 0;
+    }
     SetProcessDPIAware();
     try {
         const auto com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
@@ -311,7 +340,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
         const bool setup=std::wstring(command)==L"--setup";
         app.headline=app.label(Text::preparing); app.description=app.label(Text::checking); app.stage=app.label(Text::checking);
         // UI-only preview: no setup, disk writes, imported data or game process.
-        app.preview=std::wstring(command)==L"--preview" || std::wstring(command)==L"--preview-progress";
+        app.preview=nova::build_interface::developer && (std::wstring(command)==L"--preview" || std::wstring(command)==L"--preview-progress");
         std::wstring module(32768,L'\0'); const auto count=GetModuleFileNameW(nullptr,module.data(),static_cast<DWORD>(module.size()));
         if(!count || count>=module.size()) throw std::runtime_error("Cannot locate the launcher.");
         module.resize(count); app.launcher=fs::path(module); const auto directory=app.launcher.parent_path();
@@ -320,6 +349,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
         // Release packages ship NOVA3-Game.exe; development builds keep nova3pc.exe.
         app.executable=directory/L"NOVA3-Game.exe";
         if(!fs::is_regular_file(app.executable) && fs::is_regular_file(directory/L"nova3pc.exe"))app.executable=directory/L"nova3pc.exe";
+#if defined(NOVA_DEVELOPER_INTERFACE)
         if(std::wstring(command)==L"--render-preview" || std::wstring(command)==L"--verify-appearance") {
             // Offline renders of every setup state through the production painter.
             // --verify-appearance additionally requires the original local artwork.
@@ -350,6 +380,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
             app.skin.preview(output/"implemented-error.png",app.state());
             std::ofstream(output/"appearance-verification.txt")<<app.skin.audit();return 0;
         }
+#endif
         // One setup writer/game launch per installation, including the hidden wait.
         auto mutex_name=L"Local\\Nova3Launcher-"+std::to_wstring(std::hash<std::wstring>{}(app.layout.root.wstring()));
         HANDLE singleton=CreateMutexW(nullptr,FALSE,mutex_name.c_str());

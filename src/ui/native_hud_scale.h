@@ -8,7 +8,7 @@ public:
     NativeHudScale(const ElfImage&,RequestedScale&);
     ~NativeHudScale();
 #ifdef NOVA_UI_SCALE_FIXTURE
-    struct Bindings { std::array<uint32_t,10> functions; uint32_t device,width,height,clip; };
+    struct Bindings { std::array<uint32_t,10> functions; uint32_t device,width,height,clip; uint32_t player_component=0,is_sniper=0; };
     NativeHudScale(RequestedScale&,Bindings);
     static uint64_t fixture_hud(uint32_t);
     static uint64_t fixture_frame(const std::array<uint32_t,8>&);

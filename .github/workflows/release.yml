@@ -6,7 +6,7 @@
 #
 # Owner-approved branding comes from assets/branding/: the
 # background is packaged when present, icon.png becomes the executables' icon,
-# and logo + icon are packaged together. Missing files are simply skipped.
+# and logo + icon are required so published packages retain their branding.
 name: Release
 
 on:
@@ -109,12 +109,12 @@ jobs:
         shell: pwsh
         run: |
           $dir = 'assets/branding'
-          $background = Test-Path "$dir/background-a.png"
-          $logos = (Test-Path "$dir/logo-original.png") -and (Test-Path "$dir/icon.png")
-          "background=$($background.ToString().ToLower())" >> $env:GITHUB_OUTPUT
-          "logos=$($logos.ToString().ToLower())" >> $env:GITHUB_OUTPUT
-          if (Test-Path "$dir/icon.png") { "icon=-DNOVA_ICON_SOURCE=${{ github.workspace }}/$dir/icon.png" >> $env:GITHUB_OUTPUT }
-          else { Write-Host "::notice::assets/branding/icon.png not found; executables get no custom icon and logos are not packaged." }
+          foreach ($name in @('background-a.png', 'logo-pc.png', 'icon.png')) {
+            if (!(Test-Path "$dir/$name")) { throw "Missing required release artwork: $dir/$name" }
+          }
+          "background=true" >> $env:GITHUB_OUTPUT
+          "logos=true" >> $env:GITHUB_OUTPUT
+          "icon=-DNOVA_ICON_SOURCE=${{ github.workspace }}/$dir/icon.png" >> $env:GITHUB_OUTPUT
 
       - name: Configure
         run: cmake --preset ci ${{ steps.branding.outputs.icon }}

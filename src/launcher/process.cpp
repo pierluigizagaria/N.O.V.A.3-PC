@@ -1,6 +1,27 @@
 #include "launcher/process.h"
+#include <algorithm>
+#include <regex>
 #include <vector>
 namespace nova::launcher {
+namespace {
+// Retain two closed sessions plus the new one. Never follow links or remove
+// unrelated files; Windows refuses deletion of a log held by a running game.
+void prune_game_logs(const fs::path &directory) {
+    std::vector<std::pair<fs::file_time_type,fs::path>> logs;
+    const std::wregex name(L"game-[0-9]+-[0-9]+\\.log");
+    std::error_code error;
+    for(const auto &entry:fs::directory_iterator(directory,error)) {
+        const auto flags=GetFileAttributesW(entry.path().c_str());
+        if(flags==INVALID_FILE_ATTRIBUTES || (flags&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY)) ||
+           !std::regex_match(entry.path().filename().wstring(),name)) continue;
+        const auto time=entry.last_write_time(error);
+        if(!error) logs.emplace_back(time,entry.path());
+        error.clear();
+    }
+    std::sort(logs.begin(),logs.end(),[](const auto &a,const auto &b){return a.first>b.first;});
+    for(size_t i=2;i<logs.size();++i) DeleteFileW(logs[i].second.c_str());
+}
+}
 HANDLE start_game(const Layout &layout,const fs::path &executable) {
     if(!fs::is_regular_file(executable))
         throw std::runtime_error(executable.filename().string()+" is missing. Keep the launcher beside the game executable and its DLLs.");
@@ -14,6 +35,7 @@ HANDLE start_game(const Layout &layout,const fs::path &executable) {
             throw std::runtime_error("The launcher log folder must not contain links or junctions.");
     }
     fs::create_directories(logs);
+    prune_game_logs(logs);
     SECURITY_ATTRIBUTES security{sizeof(security),nullptr,TRUE};
     const auto log_path=logs/("game-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64())+".log");
     HANDLE log=CreateFileW(log_path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,&security,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);

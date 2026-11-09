@@ -15,7 +15,7 @@
 namespace nova::input {
 enum class Action { forward, left, back, right, sprint, jump, reload, grenade, interact,
                     melee, power, fire, aim, next, previous, slot1, slot2, slot3, slot4,
-                    slot5, chat, scores, count };
+                    slot5, chat, scores, previous_power, next_power, next_grenade, count };
 constexpr size_t action_count = static_cast<size_t>(Action::count);
 struct GamepadSample {
     uint32_t device=0;

@@ -295,9 +295,9 @@ struct FovCommands {
 void dispatch_fov_commands(camera::NativeWorldFov &,const FovCommands &,
                           const std::filesystem::path &,FovSaveResult &,
                           std::string &preview_error,const FovConfigIo *injected=nullptr);
-enum class FovControl { world_slider,weapon_slider,reset,movement_slider,count };
-enum class SensitivityControl { normal,ads,reset,count };
-enum class DisplayControl { gameplay_tab,display_tab,graphics_tab,fullscreen,resolution,first_resolution,full_hd_resolution,apply,keep,revert,ui_scale,ui_scale_reset,lod_distance,lod_original,texture_filtering,texture_original,lod_reset,texture_reset,graphics_retry,count };
+enum class FovControl { world_slider,weapon_slider,world_reset,weapon_reset,movement_slider,movement_reset,count };
+enum class SensitivityControl { normal,ads,normal_reset,ads_reset,count };
+enum class DisplayControl { gameplay_tab,display_tab,graphics_tab,fullscreen,resolution,first_resolution,full_hd_resolution,keep,revert,ui_scale,ui_scale_reset,lod_distance,lod_original,texture_filtering,texture_original,lod_best,texture_best,graphics_retry,count };
 struct FovUiRect { float x1=0,y1=0,x2=0,y2=0; };
 class FovPanel {
   public:

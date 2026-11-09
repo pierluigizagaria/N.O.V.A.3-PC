@@ -11,6 +11,8 @@ add_test(NAME interface-hd-policy COMMAND artwork-tests --synthetic)
 if(NOVA_REAL_TESTS)
   add_test(NAME sprite-selection-real COMMAND sprite-selection-tests "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so")
   set_tests_properties(sprite-selection-real PROPERTIES SKIP_RETURN_CODE 77 LABELS "real;opt-in" TIMEOUT 30)
-  add_test(NAME interface-hd-artwork-real COMMAND artwork-tests "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so" "${PROJECT_SOURCE_DIR}/local/logs/t09s-interface-hd")
-  set_tests_properties(interface-hd-artwork-real PROPERTIES SKIP_RETURN_CODE 77 LABELS "real;opt-in" TIMEOUT 60)
+  add_test(NAME interface-hd-artwork-real COMMAND artwork-tests "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so" "${PROJECT_SOURCE_DIR}/local/fixtures/artwork")
+  # Debug traverses all original sprite modules at each resolution without
+  # optimization; allow it to finish the same assertions as Release.
+  set_tests_properties(interface-hd-artwork-real PROPERTIES SKIP_RETURN_CODE 77 LABELS "real;opt-in" TIMEOUT 180)
 endif()

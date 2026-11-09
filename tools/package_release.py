@@ -5,7 +5,7 @@ optionally, the launcher background (our own generated artwork). Game data is
 never included: users drag their own APK and data onto the launcher on first
 start, which imports them into local/. The original N.O.V.A. 3 logo and icon
 (extracted from the game) are added only with --with-logos, an explicit
-owner-approved branding exception for these two files only.
+owner-approved branding exception for the composite logo and icon.
 
 Usage (from the repository root, after `cmake --build --preset release`):
     python tools/package_release.py
@@ -24,9 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 EXECUTABLES = {'nova3pc-launcher.exe': 'NOVA3.exe', 'nova3pc.exe': 'NOVA3-Game.exe'}
 # Extensions and names that indicate game content or material extracted from it.
 FORBIDDEN_SUFFIXES = {'.apk', '.obb', '.so', '.dex', '.gla', '.etc', '.ttf', '.ico', '.pdb'}
-FORBIDDEN_NAMES = {'logo-original.png', 'icon.png', 'neuropol.ttf', 'game.ico', 'ready.txt'}
+FORBIDDEN_NAMES = {'logo-original.png', 'logo-pc.png', 'icon.png', 'neuropol.ttf', 'game.ico', 'ready.txt'}
 # Original branding that --with-logos may add; nothing else extracted is ever allowed.
-LOGOS = ('logo-original.png', 'icon.png')
+LOGOS = ('logo-pc.png', 'icon.png')
 
 README = """N.O.V.A. 3 PC - unofficial port
 ================================
@@ -98,6 +98,9 @@ def package(build_dir, output, name, background, make_zip, logos=None):
     for item in files:
         shutil.copy2(item, target / shipped.get(item, item.name))
     (target / 'LEGGIMI - README.txt').write_text(README, encoding='utf-8', newline='\r\n')
+    # Only the public offline template; never copy private developer endpoints,
+    # certificates, credentials, catalogue mappings or profile selections.
+    shutil.copy2(ROOT / 'assets/server.conf', target / 'server.conf')
     if background:
         background = Path(background)
         if background.suffix.lower() != '.png':
@@ -144,9 +147,9 @@ def main(argv=None):
     parser.add_argument('--no-background', action='store_true')
     parser.add_argument('--zip', action='store_true', help='also write <name>.zip')
     parser.add_argument('--with-logos', action='store_true',
-                        help='include logo-original.png and icon.png (original game art)')
+                        help='include the approved logo-pc.png and icon.png')
     parser.add_argument('--logos-dir', default=ROOT / 'local/launcher',
-                        help='folder holding logo-original.png and icon.png (default local/launcher)')
+                        help='folder holding logo-pc.png and icon.png (default local/launcher)')
     args = parser.parse_args(argv)
     background = None if args.no_background else Path(args.background)
     if background and not background.is_file():

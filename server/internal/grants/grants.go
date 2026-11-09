@@ -16,32 +16,38 @@ type Entitlement struct {
 
 func Provision(s *persistence.Store, account, version string) error {
 	return s.Write(func(tx *sql.Tx) error {
-		c, err := persistence.Catalogue(tx, version)
-		if err != nil {
-			return err
-		}
-		var current string
-		err = tx.QueryRow("SELECT version FROM profiles WHERE account=?", account).Scan(&current)
-		if err == nil && current != version {
-			return errors.New("account is already bound to another catalogue")
-		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if _, err = tx.Exec("INSERT INTO profiles(account,version) VALUES(?,?) ON CONFLICT(account) DO NOTHING", account, version); err != nil {
-			return err
-		}
-		for _, item := range c.Items {
-			if !item.Supported {
-				continue
-			}
-			quantity := item.MaxQuantity
-			if _, err = tx.Exec("INSERT INTO entitlements(account,item,quantity) VALUES(?,?,?) ON CONFLICT(account,item) DO NOTHING", account, item.ID, quantity); err != nil {
-				return err
-			}
-		}
-		return nil
+		return ProvisionInTransaction(tx, account, version)
 	})
+}
+
+// ProvisionInTransaction lets account creation commit credentials, catalogue
+// binding and the existing community grants as one atomic registration.
+func ProvisionInTransaction(tx *sql.Tx, account, version string) error {
+	c, err := persistence.Catalogue(tx, version)
+	if err != nil {
+		return err
+	}
+	var current string
+	err = tx.QueryRow("SELECT version FROM profiles WHERE account=?", account).Scan(&current)
+	if err == nil && current != version {
+		return errors.New("account is already bound to another catalogue")
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if _, err = tx.Exec("INSERT INTO profiles(account,version) VALUES(?,?) ON CONFLICT(account) DO NOTHING", account, version); err != nil {
+		return err
+	}
+	for _, item := range c.Items {
+		if !item.Supported {
+			continue
+		}
+		quantity := item.MaxQuantity
+		if _, err = tx.Exec("INSERT INTO entitlements(account,item,quantity) VALUES(?,?,?) ON CONFLICT(account,item) DO NOTHING", account, item.ID, quantity); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func ResetConsumables(s *persistence.Store, account string, quantity int) error {
 	if quantity < 0 || quantity > 1000 {
@@ -58,12 +64,12 @@ func ResetConsumables(s *persistence.Store, account string, quantity int) error 
 		}
 		// Validate every cap before applying any update.
 		for _, item := range c.Items {
-			if item.Supported && item.Kind == "grenade" && quantity > item.MaxQuantity {
+			if item.Supported && item.HasSupply() && quantity > item.MaxQuantity {
 				return errors.New("quantity exceeds an item cap")
 			}
 		}
 		for _, item := range c.Items {
-			if item.Supported && item.Kind == "grenade" {
+			if item.Supported && item.HasSupply() {
 				if _, err = tx.Exec("UPDATE entitlements SET quantity=? WHERE account=? AND item=?", quantity, account, item.ID); err != nil {
 					return err
 				}
@@ -80,7 +86,9 @@ func ResetConsumables(s *persistence.Store, account string, quantity int) error 
 				if err = json.Unmarshal([]byte(body), &selection); err != nil {
 					return err
 				}
-				delete(selection, "grenade")
+				if item, ok := c.Find(selection["grenade"]); ok && item.HasSupply() {
+					delete(selection, "grenade")
+				}
 				data, e := json.Marshal(selection)
 				if e != nil {
 					return e

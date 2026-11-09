@@ -242,6 +242,7 @@ Config read_config(const std::filesystem::path &path, std::filesystem::path &obb
                 setting = key == "weapon_fov" ? std::min(degrees,104.f) : degrees;
             }
         }
+#if defined(NOVA_DEVELOPER_INTERFACE)
         else if (key.starts_with("hosts.")) {
             auto name = key.substr(6);
             std::transform(name.begin(), name.end(), name.begin(),
@@ -249,7 +250,9 @@ Config read_config(const std::filesystem::path &path, std::filesystem::path &obb
             if (name.ends_with('.'))
                 name.pop_back();
             out.hosts[name] = value;
-        } else
+        }
+#endif
+        else
             throw std::runtime_error("Unknown config key: " + key);
     }
     if (!obb.empty() && obb.is_relative())

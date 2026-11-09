@@ -293,11 +293,14 @@ int main(int argc, char **argv) {
     try {
         std::string mode = argv[2];
         auto directory = std::filesystem::absolute(argv[3]);
+        std::filesystem::create_directories(directory);
+        std::filesystem::current_path(directory);
         nova::bionic::PathConfig paths;
         paths.profile_root = directory;
         nova::bionic::configure_paths(paths);
-        auto dump = std::filesystem::path(NOVA_SOURCE_DIR) / "local/audio/tests" /
-                    directory.parent_path().filename() / directory.filename() / (mode + ".wav");
+        // Audio capture stays under the fixture's own local/ safety boundary,
+        // not the developer's local/audio tree.
+        auto dump = directory / "local" / (mode + ".wav");
         if (mode == "preflight") {
             preflight(directory);
             std::puts("PASS audio-preflight");
@@ -395,6 +398,7 @@ int main(int argc, char **argv) {
         }
         nova::audio::shutdown();
         nova::bionic::stream_flush(nullptr);
+        std::filesystem::remove(dump);
         std::printf("PASS audio-%s\n", mode.c_str());
         return 0;
     } catch (const std::exception &e) {

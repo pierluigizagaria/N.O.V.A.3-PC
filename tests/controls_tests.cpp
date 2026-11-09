@@ -21,6 +21,10 @@ int main(int argc,char **argv) {
     try {
         check(argc == 2,"fixture path");
         ControlsConfig defaults;
+        check(defaults.keys.at(SDLK_Q)==Action::power && defaults.keys.at(SDLK_Z)==Action::previous_power &&
+              defaults.keys.at(SDLK_X)==Action::next_power && defaults.keys.at(SDLK_C)==Action::next_grenade &&
+              defaults.buttons.at(SDL_BUTTON_MIDDLE)==Action::grenade && !defaults.keys.contains(SDLK_G),
+              "power and grenade defaults use Q/Z/X/C and middle mouse");
         std::istringstream conf("sensitivity = 0.25\ninvert_y = true\ntouch_autoaim = true\nbind.Z = jump\nbind.MOUSE2 = melee\nbind.WHEELUP = previous\n");
         auto config = ControlsConfig::parse(conf);
         check(config.sensitivity == .25f && config.invert_y && config.touch_autoaim &&
@@ -47,6 +51,15 @@ int main(int argc,char **argv) {
         Controls controls(defaults);
         check(!controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_W)),"menus do not consume movement");
         controls.gameplay = true;
+        for(auto code:{SDLK_Z,SDLK_X,SDLK_C}) {
+            controls.handle(key(SDL_EVENT_KEY_DOWN,code));
+            auto repeated=key(SDL_EVENT_KEY_DOWN,code); repeated.key.repeat=true; controls.handle(repeated);
+            controls.handle(key(SDL_EVENT_KEY_UP,code));
+            const auto selected=controls.take();
+            check(selected.pressed.size()==1 && selected.edge(defaults.keys.at(code)),
+                  "selection emits one edge per press, not per key repeat");
+            check(controls.take().pressed.empty(),"selection edge drains once");
+        }
         controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_W));
         controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_D));
         controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_SPACE));

@@ -17,9 +17,7 @@ args = parser.parse_args()
 exe = Path(args.executable).resolve()
 fixture = None
 if args.setup:
-    work = Path(__file__).resolve().parents[1] / "local/test-profiles"
-    work.mkdir(parents=True, exist_ok=True)
-    fixture = tempfile.TemporaryDirectory(prefix="launcher-picker-", dir=work)
+    fixture = tempfile.TemporaryDirectory(prefix="nova-launcher-picker-")
     isolated = Path(fixture.name)
     shutil.copy2(exe, isolated / exe.name)
     for dll in exe.parent.glob("zlib*.dll"):
@@ -123,7 +121,8 @@ try:
         Image.frombytes("RGB", (width, height), pixels.raw, "raw", "BGRX").save(destination)
         g.DeleteObject(bmp); g.DeleteDC(target); u.ReleaseDC(window, dc)
     u.PostMessageW(window, 0x10, 0, 0)
-    assert process.wait(timeout=10) == 0, "Preview teardown failed"
+    code = process.wait(timeout=10)
+    assert code == 0, f"Launcher teardown failed: {code:#x}"
     print("Native caption layout, no caption icon, preview-only controls and clean teardown: PASS")
 finally:
     if process.poll() is None:

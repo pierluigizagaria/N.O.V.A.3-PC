@@ -133,4 +133,40 @@ GuestCall::~GuestCall() {
         catch (...) { std::terminate(); }
     }
 }
+GuestCheckpoint::GuestCheckpoint(const ElfImage& image,const std::string& owner,uint32_t offset,
+                                std::initializer_list<uint8_t> expected,uint32_t callback):saved_(expected) {
+    const auto function=require_function(image,owner);
+    if(!callback || offset>UINT32_MAX-function-6 || saved_.size()!=6 ||
+       saved_[0]!=0x8b || (saved_[1]!=0x83 && saved_[1]!=0x86))
+        throw std::runtime_error("Unsupported guest checkpoint");
+    const auto site=function+offset;
+    if(!image.executable(site) || !image.executable(site+5) ||
+       std::memcmp(reinterpret_cast<void*>(site),saved_.data(),6))
+        throw std::runtime_error("Guest checkpoint identity mismatch: "+owner);
+    // pushfd/pushad; aligned FXSAVE area; aligned cdecl callback; FXRSTOR;
+    // restore registers/flags, then replay MOV EAX,[EBX/ESI+disp32].
+    std::vector<uint8_t> code{0x9c,0x60,0x89,0xe5,0x81,0xec,0x10,0x02,0,0,
+        0x83,0xe4,0xf0,0x0f,0xae,0x04,0x24,0x83,0xec,0x10,0xe8,0,0,0,0,
+        0x83,0xc4,0x10,0x0f,0xae,0x0c,0x24,0x89,0xec,0x61,0x9d};
+    code.insert(code.end(),saved_.begin(),saved_.end());code.resize(code.size()+5);
+    auto* buffer=static_cast<uint8_t*>(VirtualAlloc(nullptr,code.size(),MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if(!buffer)throw std::runtime_error("Guest checkpoint allocation failed");
+    bridge_=reinterpret_cast<uint32_t>(buffer);
+    try {
+        const auto relative=callback-(bridge_+25);std::memcpy(code.data()+21,&relative,4);
+        code[code.size()-5]=0xe9;
+        const auto back=site+6-(bridge_+static_cast<uint32_t>(code.size()));
+        std::memcpy(code.data()+code.size()-4,&back,4);
+        std::memcpy(buffer,code.data(),code.size());DWORD previous=0;
+        if(!VirtualProtect(buffer,code.size(),PAGE_EXECUTE_READ,&previous) || !FlushInstructionCache(GetCurrentProcess(),buffer,code.size()))
+            throw std::runtime_error("Guest checkpoint protection failed");
+        uint8_t patch[6]{0xe9,0,0,0,0,0x90};
+        const auto forward=bridge_-(site+5);std::memcpy(patch+1,&forward,4);
+        write_code(site,patch,6);target_=site;
+    } catch(...) {VirtualFree(buffer,0,MEM_RELEASE);bridge_=0;throw;}
+}
+GuestCheckpoint::~GuestCheckpoint() {
+    if(target_) {try {write_code(target_,saved_.data(),saved_.size());}catch(...){std::terminate();}}
+    if(bridge_)VirtualFree(reinterpret_cast<void*>(bridge_),0,MEM_RELEASE);
+}
 }

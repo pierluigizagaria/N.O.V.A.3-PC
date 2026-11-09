@@ -4,8 +4,11 @@
 #include "menu/initial_target_scaling.h"
 #include "loader/diagnostics.h"
 #include "ui/native_hud_scale.h"
+#include "ui/native_scale.h"
 #include "ui/native_menu_fonts.h"
 #include "ui/native_pixel_resources.h"
+#include "ui/menu_sprite_layout.h"
+#include "ui/pause_resources.h"
 #include <bit>
 #include <map>
 #include <sstream>
@@ -182,10 +185,27 @@ void integration(Runtime& r,const std::filesystem::path& root) {
     word(r.image->symbol("g_device"))=ptr(device.data());
     abi::GuestHook open(*r.image,"_ZN6glitch2io14CGlfFileSystem17createAndOpenFileEPKc",{0x55,0x89,0xe5,0x57,0x56,0x53},ptr(reinterpret_cast<void*>(&file_entry)));
     abi::GuestHook texture(*r.image,"_ZN6glitch5video15CTextureManager10getTextureEPKcS3_",{0x55,0x89,0xe5,0x57,0x56,0x53},ptr(reinterpret_cast<void*>(&texture_entry)));
-    const std::array<const char*,4> names{"hud3d.bsprite","menu_elements_nova3.bsprite","controls.bsprite","chatboard.bsprite"};
+    const std::array<const char*,6> names{"hud3d.bsprite","menu_elements_nova3.bsprite","controls.bsprite","chatboard.bsprite","upgrades.bsprite","game_actions_icons.bsprite"};
     ui::RequestedScale requested;
+    ui::NativeScale menu_scale(*r.image,requested);
     ui::NativeHudScale hud_scale(*r.image,requested);ui::NativeMenuFonts menu_fonts(*r.image);
+    std::array<uint32_t,9> pause_target{};uint32_t pause_target_ref=ptr(pause_target.data());
+    driver[0x114/4]=ptr(&pause_target_ref);driver[0x118/4]=ptr(&pause_target_ref)+4;
+    const auto pause_site=r.image->address(0x4960d1,5);
+    check(*reinterpret_cast<uint8_t*>(pause_site)==0xe8,"pause metrics call remains a direct CALL");
+    const auto pause_metrics=pause_site+5+word(pause_site+1);
+    // Bind this regression to the resource actually requested by Create,
+    // including its original PIC string operand, instead of guessing a family.
+    const std::array<uint8_t,6> resource_operand{0x8d,0x93,0x6a,0x85,0xd4,0xff};
+    check(!std::memcmp(reinterpret_cast<void*>(r.image->address(0x495ef3,6)),resource_operand.data(),6),
+          "pause Create's resource operand matches the inspected original");
+    const auto pause_name=reinterpret_cast<const char*>(r.image->address(0xe868aa,17));
+    check(!std::strcmp(pause_name,"Chatboard.bsprite"),"pause test uses the actual original Create resource");
     std::map<std::array<unsigned,2>,std::map<std::string,std::array<uint32_t,4>>> native_states;
+    std::map<std::array<unsigned,2>,std::map<std::string,Geometry>> native_geometry;
+    constexpr std::array<unsigned,4> pause_frames{187,188,197,198};
+    std::array<std::array<int16_t,4>,4> pause_reference{};
+    bool reproduced_pause_overflow=false,reproduced_pause_shrink=false;
     for(auto extent:std::array<std::array<unsigned,2>,8>{{{640,360},{960,540},{1280,720},{1600,900},{1920,1080},{1920,1200},{2560,1440},{3840,2160}}}) {
         std::map<std::string,Geometry> baseline;
         std::map<std::string,std::array<uint32_t,4>> globals;
@@ -209,6 +229,7 @@ void integration(Runtime& r,const std::filesystem::path& root) {
                 if(!enabled)globals[name]=state;else check(globals[name]==state,"native screen metrics and device detection side effects unchanged");
                 if(!enabled)native_states[extent][name]=state;
                 auto measured=geometry(sprite);
+                if(!enabled)native_geometry[extent][name]=measured;
                 if(std::string(name)=="menu_elements_nova3.bsprite") {
                     const auto uv_fn=r.fn("_ZN7CSprite11GetModuleUVEiRN6glitch4core4rectIfEEja");
                     if(!enabled)for(unsigned m=0;m<half(sprite,0xe);++m){
@@ -231,16 +252,124 @@ void integration(Runtime& r,const std::filesystem::path& root) {
             if(enabled) {
                 check(textures.contains("nv_hud") && textures.at("nv_hud")->object[5]==2048 && textures.at("nv_hud")->file=="nv_hud_2560x1504.etc","base HUD material cache owns actual2048 source");
                 check(textures.contains("menu_elements_nova3_1720x1280"),"menu HD atlas loaded at every PC resolution");
+                const auto sprite=abi::invoke(r.fn("_ZN14CSpriteManager9GetSpriteEPKc"),{ptr(manager.data()),ptr(pause_name)});
+                check(sprite && half(sprite,0x48)==264,"actual pause resource has the original264 frames");
+                // The isolated fixture skips game initializers. Pause layout
+                // runs with native frame-offset scaling enabled in the game.
+                auto& scaling=*reinterpret_cast<uint8_t*>(r.image->symbol("_ZN7CSprite13m_bUseScalingE"));
+                const auto saved_scaling=scaling;scaling=1;
+                const auto compute=r.fn("_ZN7CSprite17ComputeFrameRectsEv");
+                for(const auto* icon_name:{"upgrades.bsprite","game_actions_icons.bsprite"}) {
+                const auto upgrades=abi::invoke(r.fn("_ZN14CSpriteManager9GetSpriteEPKc"),{ptr(manager.data()),ptr(icon_name)});
+                const auto original_icons=geometry(upgrades);
+                const auto icons_texture=word(upgrades,0x9c);
+                // Real shared icon resource: verify that it is independent of
+                // load resolution during pause and fully restored afterwards.
+                {
+                    ui::PauseResources metrics(compute);metrics.icons(upgrades);
+                    check(word(upgrades,0xb0)==std::bit_cast<uint32_t>(*ui::pause_sprite_scale(upgrades,1280,720)),"power carousel uses canonical pause metrics");
+                    check(word(upgrades,0x9c)==icons_texture,"pause power metrics preserve HD texture ownership");
+                    const auto stable=geometry(upgrades);
+                    abi::invoke(compute,{upgrades});
+                    check(geometry(upgrades)==stable,"power icon nested bounds converge");
+                }
+                check(geometry(upgrades)==original_icons,"shared power icon metrics restored after pause");
+                }
+                // Execute the original TTF measurement against its real vtable,
+                // with a retained font of a different raster size.
+                std::array<uint32_t,64> font{},ttf{};
+                font[0]=r.image->symbol("_ZTV11CTTFFontSpr")+8;
+                font[0xc8/4]=ptr(ttf.data());
+                reinterpret_cast<uint8_t*>(font.data())[0xc5]=1;
+                font[0xb0/4]=font[0xb4/4]=std::bit_cast<uint32_t>(1.f);
+                const auto line_height=r.fn("_ZN11CTTFFontSpr13GetLineHeightEv");
+                for(unsigned raster:{18u,24u,37u,74u}) {
+                    ttf[0x54/4]=raster;
+                    {
+                        ui::PauseResources metrics(compute);metrics.font(ptr(font.data()),24);
+                        const auto measured=abi::invoke(line_height,{ptr(font.data())});
+                        check(measured>=23 && measured<=24,"native TTF height stays canonical across cached raster sizes");
+                    }
+                    check(abi::invoke(line_height,{ptr(font.data())})==raster,"native gameplay font size restored after pause");
+                }
+                const auto rect_fn=r.fn("_ZNK7CSprite12GetFrameRectERN6glitch4core4rectIsEEiiijiib");
+                const auto bounds=[&](unsigned frame) {
+                    std::array<int16_t,4> rect{};
+                    abi::invoke(rect_fn,{sprite,ptr(rect.data()),frame,0,0,0,0,0,0});return rect;
+                };
+                const auto set_scale=[&](float scale) {
+                    word(sprite,0xb0)=word(sprite,0xb4)=std::bit_cast<uint32_t>(scale);
+                    abi::invoke(compute,{sprite});
+                };
+                const auto texture_array=word(sprite,0x9c),image_names=word(sprite,0xa0);
+                const auto logical_name=reinterpret_cast<const char*>(word(image_names));
+                const bool dense_descriptor=!std::strcmp(logical_name,"chatboard_1720x1280.tga");
+                check(dense_descriptor || !std::strcmp(logical_name,"chatboard_960x640.tga"),"actual pause descriptor admitted");
+                // The two native Chatboard variants have different artwork
+                // offsets. Use each original descriptor's authored bounds,
+                // not the unrelated front-end menu or the other variant.
+                set_scale(1);
+                for(unsigned pass=1;pass<4;++pass)abi::invoke(compute,{sprite});
+                for(unsigned i=0;i<pause_frames.size();++i)pause_reference[i]=bounds(pause_frames[i]);
+                const auto before_globals=native_states.at(extent).at("chatboard.bsprite");
+                for(auto display:std::array<std::array<unsigned,2>,6>{{{1280,720},{1920,1080},{3840,2160},{960,540},{1920,1080},{1280,720}}}) {
+                    const float fit=std::min(display[0]/960.f,display[1]/640.f);
+                    // The live failing process retained the low Chatboard
+                    // descriptor while another load had set the device flag.
+                    // Reproduce that flag independently of this load's extent.
+                    const bool flag=true;
+                    // Original Create's width-only condition, with its already
+                    // loaded sprite retained across the display transition.
+                    set_scale(fit*((display[0]==1920 && flag) ? .5f : 1.f));
+                    const auto broken=bounds(197);
+                    check(bool(ui::pause_sprite_scale(sprite,display[0],display[1])),"known cached menu descriptor admitted");
+                    pause_target[7]=display[0];pause_target[8]=display[1];
+                    // Exercise the installed Create call target and actual
+                    // native frame computation, not only a mirrored formula.
+                    abi::invoke(pause_metrics,{sprite});
+                    const auto corrected=bounds(197);
+                    if(dense_descriptor && display[0]==1280) {
+                        check(broken[2]-broken[0]>=1.9f*(corrected[2]-corrected[0]),"original post-resize pause frame reproduces doubled geometry");
+                        reproduced_pause_overflow=true;
+                    }
+                    if(!dense_descriptor && display[0]==1920) {
+                        check(corrected[2]-corrected[0]>=1.9f*(broken[2]-broken[0]),"live low Chatboard with1920 flag reproduces half-size artwork");
+                        reproduced_pause_shrink=true;
+                    }
+                    const float authored_scale=fit/(dense_descriptor ? 2.f : 1.f);
+                    for(unsigned i=0;i<pause_frames.size();++i) {
+                        const auto actual=bounds(pause_frames[i]);
+                        for(unsigned axis=0;axis<4;++axis) {
+                            if(std::abs(actual[axis]-pause_reference[i][axis]*authored_scale)>2.f*fit+1)
+                                std::fprintf(stderr,"pause load=%ux%u display=%ux%u frame=%u axis=%u actual=%d reference=%d fit=%f scale=%f name=%s\n",
+                                    extent[0],extent[1],display[0],display[1],pause_frames[i],axis,actual[axis],pause_reference[i][axis],fit,
+                                    std::bit_cast<float>(word(sprite,0xb0)),reinterpret_cast<const char*>(word(image_names)));
+                            check(std::abs(actual[axis]-pause_reference[i][axis]*authored_scale)<=2.f*fit+1,
+                                  "pause frame geometry fits the authored canvas regardless of cached descriptor or display resolution");
+                        }
+                    }
+                    const auto cache=word(sprite,0x5c);const auto size=half(sprite,0x48)*8;
+                    std::vector<uint8_t> stable(reinterpret_cast<uint8_t*>(cache),reinterpret_cast<uint8_t*>(cache)+size);
+                    abi::invoke(compute,{sprite});
+                    check(!std::memcmp(stable.data(),reinterpret_cast<void*>(cache),size),"all nested frame bounds converge before controls measure them");
+                    check(word(sprite,0x9c)==texture_array && word(sprite,0xa0)==image_names,"pause reflow preserves HD textures and descriptor identity");
+                    check(word(r.image->symbol("g_ScreenW"))==before_globals[0] && word(r.image->symbol("g_ScreenH"))==before_globals[1] &&
+                          word(r.image->address(0x115679c,4))==before_globals[2] && *reinterpret_cast<uint8_t*>(r.image->symbol("isCheckDataGoogleDeal"))==before_globals[3],
+                          "pause metrics do not spoof display state or device detection");
+                }
+                scaling=saved_scaling;
             }
             abi::invoke(r.fn("_ZN14CSpriteManagerD1Ev"),{ptr(manager.data())});policy.reset();clear_textures();
             check(allocated==0,"complete native sprite and file lifecycle balances allocations");
         }
     }
-    // Pixel policy uses one logical resource baseline even on a fresh start.
+    check(reproduced_pause_overflow,"original cached high-density pause regression exercised");
+    check(reproduced_pause_shrink,"observed low-descriptor/HD-device mismatch regression exercised");
+    // Only HUD families use one logical 720p baseline on a fresh start.
+    // Menu/chat resources must match the native load at the actual resolution.
     // The separate HD-only comparison above must continue passing unchanged.
     {
         ui::NativePixelResources pixels(*r.image);
-        std::map<std::string,Geometry> reference;
         for(auto extent:std::array<std::array<unsigned,2>,6>{{{1920,1080},{1280,720},{3840,2160},{640,360},{2560,1440},{1920,1080}}}) {
             clear_textures();std::array<uint32_t,4> manager{};
             word(r.image->symbol("g_ScreenW"))=extent[0];word(r.image->symbol("g_ScreenH"))=extent[1];
@@ -263,8 +392,9 @@ void integration(Runtime& r,const std::filesystem::path& root) {
                     check(state==expected_state,"pixel resources preserve actual-resolution device detection and manager counters");
                     const auto sprite=abi::invoke(r.fn("_ZN14CSpriteManager9GetSpriteEPKc"),{ptr(manager.data()),ptr(name)});
                     const auto measured=geometry(sprite);
-                    if(!reference.contains(name))reference[name]=measured;
-                    else check(measured==reference[name],"fresh-start sprite metrics, frame bounds and actual emitted quads match1080p at every resolution");
+                    const bool fixed=std::string(name)=="hud3d.bsprite" || std::string(name)=="controls.bsprite";
+                    check(measured==native_geometry.at(fixed ? std::array<unsigned,2>{1280,720} : extent).at(name),
+                          "HUD geometry matches720p; shared menu and information resources retain native geometry");
                 }
                 check(textures.contains("nv_hud") && textures.at("nv_hud")->object[5]==2048,"pixel normalization retains2048 HUD artwork");
                 check(textures.contains("menu_elements_nova3_1720x1280"),"pixel normalization retains menu HD artwork");

@@ -14,7 +14,8 @@ public:
     class Scope {
     public:
         Scope(const std::vector<uint32_t>& groups,float factor,
-              const std::unordered_map<uint32_t,uint32_t>& shared_pivots={});
+              const std::unordered_map<uint32_t,uint32_t>& shared_pivots={},
+              const std::unordered_map<uint32_t,std::array<float,2>>& edge_anchors={});
         ~Scope();
         Scope(const Scope&)=delete;
         std::optional<std::array<float,2>> anchor(uint32_t group) const;

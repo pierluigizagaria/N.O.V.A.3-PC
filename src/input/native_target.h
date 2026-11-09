@@ -175,9 +175,12 @@ void draw_interface_controls(bool scope,SchemeControl scheme_control,InterfaceCo
     // both standard and projected artwork, including aliases in the scheme.
     // Mobile movement/combat controls below remain independently suppressed.
     const auto standard=interface_control(0x60),projected=interface_control(0x64);
+    // Power selectors convey the current choice and availability on PC too.
+    // Preserve aliases so hiding a touch control cannot blank their artwork.
+    const auto power=scheme_control(0x44),multiplayer_power=interface_control(0x5c);
     std::map<uint32_t,uint8_t> buttons;
     auto hide = [&](uint32_t button) {
-        if (button && button!=standard && button!=projected && !buttons.contains(button)) buttons[button] = visible(button);
+        if (button && button!=standard && button!=projected && button!=power && button!=multiplayer_power && !buttons.contains(button)) buttons[button] = visible(button);
     };
     for (uint32_t slot = 0x28; slot <= 0x44; slot += 4) hide(scheme_control(slot));
     for (auto offset : {0x10u,0x20u,0x24u,0x28u,0x2cu,0x4cu,0x5cu,0x68u,0x6cu,0x70u,0x74u,0x78u}) {

@@ -1,0 +1,4 @@
+# Optional development-only original pose/controller parity probes.
+# Synthetic tests and the distributed client/server do not need these packages.
+unicorn==2.1.4
+pyelftools==0.32

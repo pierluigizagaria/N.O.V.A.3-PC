@@ -64,7 +64,7 @@ void mutate_byte(uint32_t address,uint8_t value) {
 class LocalVariant {
   public:
     LocalVariant(const std::filesystem::path &directory,std::span<const uint8_t> bytes) {
-        // CTest supplies an ignored local/work directory. Never alter the input SO.
+        // CTest supplies an ignored build runtime directory. Never alter the input SO.
         std::filesystem::create_directories(directory);
         wchar_t name[MAX_PATH]{};
         check(GetTempFileNameW(directory.c_str(),L"T11",0,name)!=0,"create unique local variant");

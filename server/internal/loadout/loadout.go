@@ -58,7 +58,7 @@ func set(tx *sql.Tx, account string, selection Selection) error {
 		if err = tx.QueryRow("SELECT quantity FROM entitlements WHERE account=? AND item=?", account, id).Scan(&quantity); err != nil {
 			return errors.New("item is not owned")
 		}
-		if kind == "grenade" && quantity == 0 {
+		if item.HasSupply() && quantity == 0 {
 			return errors.New("consumable has no test supply")
 		}
 	}
@@ -67,7 +67,15 @@ func set(tx *sql.Tx, account string, selection Selection) error {
 		return err
 	}
 	_, err = tx.Exec("INSERT INTO loadouts(account,body) VALUES(?,?) ON CONFLICT(account) DO UPDATE SET body=excluded.body", account, string(body))
+	if err == nil {
+		_, err = tx.Exec("DELETE FROM native_equipment WHERE account=?", account)
+	}
 	return err
+}
+
+// SetInTransaction is used by account-bound compatibility storage updates.
+func SetInTransaction(tx *sql.Tx, account string, selection Selection) error {
+	return set(tx, account, selection)
 }
 func Get(s *persistence.Store, account string) (Selection, error) {
 	var exists int

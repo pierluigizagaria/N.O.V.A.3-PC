@@ -2,12 +2,26 @@
 #include "launcher/process.h"
 #include "launcher/language.h"
 #include "launcher/shortcut.h"
+#include "net/server_config.h"
 #include <shellapi.h>
 #include <fstream>
 #include <iostream>
 using namespace nova::launcher;
 int wmain(int argc,wchar_t **argv) {
     try {
+        if(argc==5 && std::wstring(argv[1])==L"prepare-original") {
+            Layout layout{argv[2]};
+            Progress progress{[](const std::string &message){std::cout<<message<<std::endl;},{},nullptr};
+            prepare(layout,argv[3],argv[4],progress);
+            return ready(layout)?0:11;
+        }
+        if(argc==3 && std::wstring(argv[1])==L"server-config") {
+            const auto config=nova::net::read_server_config(argv[2]);
+            if(!config.present) return 1;
+            std::cout<<"PASS server configuration; mode="<<static_cast<int>(config.mode)
+                     <<'\n';
+            return 0;
+        }
         if(argc==2 && std::wstring(argv[1])==L"language") {
             const std::pair<std::wstring,Language> locales[]{
                 {L"IT-it",Language::italian},{L"it_CH",Language::italian},{L"en-US",Language::english},

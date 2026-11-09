@@ -391,7 +391,7 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
         panel.gl_initialize(); check(gl_state()==before && glGetError()==GL_NO_ERROR,"real prewarm state/PBO/unpack restored");
     });
     panel.ui_visible(true);
-    static_assert(static_cast<size_t>(FovControl::count)==4,"two optics sliders, bob and Reset");
+    static_assert(static_cast<size_t>(FovControl::count)==6,"three sliders with independent reset arrows");
     auto isolated_config=output; isolated_config+=".settings-test.conf";
     std::filesystem::create_directories(isolated_config.parent_path());
     std::filesystem::remove(isolated_config);
@@ -576,18 +576,22 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
         check(!build().save && persistence_calls==before+1,"close finalization never repeats");
         panel.ui_visible(true); build(); build();
     }
-    command=click(FovControl::reset);
+    const auto weapon_before_reset=build().visible.weapon;
+    command=click(FovControl::world_reset);
+    check(!command.visible.world && command.visible.weapon==weapon_before_reset,
+          "world reset preserves the independent weapon FOV");
+    command=click(FovControl::weapon_reset);
     check(command.save && !command.visible.world && !command.visible.weapon && frame.last_save.saved,
           "Reset immediately persists both Native/default values");
     numeric=panel.displayed_values();
     check(numeric[0]==defaults.world && numeric[1]==defaults.weapon,"Reset restores numeric labels and actual thumb storage");
     observe(command);
-    command=click(FovControl::reset); observe(command);
+    command=click(FovControl::world_reset); command=click(FovControl::weapon_reset); observe(command);
     check(panel.displayed_values()==numeric,"repeated Native Reset preserves both normal numeric positions");
     command=drag(FovControl::weapon_slider);
     check(!command.visible.world && command.visible.weapon,"weapon-only widget change starts from Native world");
     observe(command);
-    command=click(FovControl::reset); observe(command);
+    command=click(FovControl::world_reset); command=click(FovControl::weapon_reset); observe(command);
     check(panel.displayed_values()==numeric,"Reset after another Custom edit restores both normal thumbs again");
     frame.width=1600; frame.height=720; build();
     check(panel.displayed_values()==numeric,"Letterboxed window aspect cannot change guest-native optical baseline");
@@ -601,7 +605,7 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
     check(!frame.last_save.saved && !frame.last_save.error.empty(),"actual automatic-save failure reaches minimal UI error line");
     parsed=nova::profile::read_config(isolated_config,obb);
     check(!parsed.world_fov && !parsed.weapon_fov,"failed automatic save preserves previous isolated file");
-    reject_persistence=false; command=click(FovControl::reset); build(); observe(command);
+    reject_persistence=false; command=click(FovControl::world_reset); command=click(FovControl::weapon_reset); build(); observe(command);
     check(frame.last_save.saved && frame.last_save.error.empty(),"successful Reset clears persistence failure");
     const auto current=build().visible; frame.running_gameplay=false; frame.dpi_scale=1.5f;
     check(build().visible==current && !build().save,"paused host frame and DPI do not persist or change optics");
@@ -661,8 +665,10 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
     frame.minimized=false; build();
     {
         auto display_click=[&](DisplayControl control) {
+            build(); // Settle popup closure before reading the next widget's geometry.
             const auto rect=panel.display_control_rect(control);
-            check(rect.x2>rect.x1 && rect.y2>rect.y1,"Display widget has actual geometry");
+            if(!(rect.x2>rect.x1 && rect.y2>rect.y1))
+                throw std::runtime_error("Display widget has no geometry: "+std::to_string(static_cast<int>(control)));
             const auto x=(rect.x1+rect.x2)/2,y=(rect.y1+rect.y2)/2;
             mouse(SDL_EVENT_MOUSE_MOTION,x,y); build();
             mouse(SDL_EVENT_MOUSE_BUTTON_DOWN,x,y); build();
@@ -698,22 +704,23 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
         display_command=display_click(DisplayControl::fullscreen);
         check(display_command.display && !display_command.display->fullscreen,"Fullscreen toggle supports both directions");
         frame.display={};
+        check(panel.display_control_rect(DisplayControl::resolution).y2 <
+              panel.display_control_rect(DisplayControl::fullscreen).y1,"Fullscreen follows resolution");
+        check(!display_click(DisplayControl::resolution).apply_render,"unavailable resolution emits no request");
+        frame.render_available=true;
         display_click(DisplayControl::resolution); build();
         display_command=display_click(DisplayControl::first_resolution);
         check(display_command.render_extent==GuestExtent{1600,900} && !display_command.display &&
               !display_command.save && persistence_calls==before,
-              "Real resolution combo emits exact supported choice without saving before apply");
+              "Resolution selection emits its choice without premature persistence");
         frame.render_extent=*display_command.render_extent;
         check(!build().render_extent,"Idle render selection never repeats or resizes SDL output");
-        check(!display_click(DisplayControl::apply).apply_render,"Apply refuses unavailable backend without saving or faking active extent");
-        frame.render_available=true;
-        display_command=display_click(DisplayControl::apply);
-        check(display_command.apply_render && !display_command.render_extent && !display_command.save &&
-              frame.active_render_extent==GuestExtent{},"Apply emits one command with active extent unchanged until ACK");
+        check(display_command.apply_render && frame.active_render_extent==GuestExtent{},
+              "selection immediately requests application while active extent waits for ACK");
         frame.render_busy=true; build();
-        check(!display_click(DisplayControl::apply).apply_render,"busy Apply never duplicates the request");
+        check(!display_click(DisplayControl::resolution).apply_render,"busy resolution cannot request another change");
         frame.render_busy=false; frame.active_render_extent=frame.render_extent; build();
-        check(!display_click(DisplayControl::apply).apply_render,"acknowledged active resolution disables idle Apply");
+        check(!build().apply_render,"idle applied resolution never repeats");
         frame.render_confirming=true; frame.render_seconds_remaining=15; build(); build();
         auto confirmation=display_click(DisplayControl::keep);
         check(confirmation.keep_render && !confirmation.apply_render && !confirmation.save,
@@ -723,10 +730,16 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
         frame.render_busy=false; build();
         check(display_click(DisplayControl::revert).revert_render,"Revert emits explicit recovery");
         frame.render_confirming=false; build(); build();
+        frame.render_unsaved=true;
+        display_click(DisplayControl::resolution); build();
+        display_command=display_click(DisplayControl::first_resolution);
+        check(display_command.apply_render && display_command.render_extent==frame.active_render_extent,
+              "reselecting current unsaved resolution retries persistence without a separate Apply button");
+        frame.render_unsaved=false;
         display_click(DisplayControl::resolution); build();
         display_command=display_click(DisplayControl::full_hd_resolution);
-        check(display_command.render_extent==GuestExtent{1920,1080} && !display_command.apply_render && !display_command.save,
-              "Full HD selection stages only and keeps the running scene until Apply");
+        check(display_command.render_extent==GuestExtent{1920,1080} && display_command.apply_render && !display_command.save,
+              "Full HD selection requests immediate application");
 
         build(); build();
         auto scale_rect=panel.display_control_rect(DisplayControl::ui_scale);
@@ -765,10 +778,15 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
         parsed=nova::profile::read_config(isolated_config,obb);
         check(parsed.lod_distance==1 && parsed.texture_filtering==0 && parsed.world_fov==101.f,"restart reads selected quality, preserving optics");
         check(!build().graphics_quality,"idle quality does not autosave repeatedly");
-        quality_command=display_click(DisplayControl::lod_reset);
-        check(quality_command.graphics_quality==GraphicsQuality{4,0},"detail reset restores best default and preserves texture choice");
-        quality_command=display_click(DisplayControl::texture_reset);
-        check(quality_command.graphics_quality==GraphicsQuality{},"texture reset restores best default and preserves detail choice");
+        mouse(SDL_EVENT_MOUSE_MOTION,800,500); build(); gl.run(draw);
+        for(size_t y=0;y<720;++y) std::copy_n(pixels.data()+(719-y)*1280*4,1280*4,top.data()+y*1280*4);
+        nova::gles::write_png(output.parent_path()/(output.stem().string()+"-graphics-pending.png"),1280,720,top);
+        display_click(DisplayControl::lod_distance); build();
+        quality_command=display_click(DisplayControl::lod_best);
+        check(quality_command.graphics_quality==GraphicsQuality{4,0},"detail menu restores best default and preserves texture choice");
+        display_click(DisplayControl::texture_filtering); build();
+        quality_command=display_click(DisplayControl::texture_best);
+        check(quality_command.graphics_quality==GraphicsQuality{},"texture menu restores best default and preserves detail choice");
         build(); gl.run(draw);
         for(size_t y=0;y<720;++y) std::copy_n(pixels.data()+(719-y)*1280*4,1280*4,top.data()+y*1280*4);
         nova::gles::write_png(output.parent_path()/(output.stem().string()+"-graphics.png"),1280,720,top);
@@ -891,7 +909,10 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
         check(captured.visible==optics_before && !captured.save && persistence_calls==saves_before &&
               !captured.display && !captured.apply_render && !captured.sensitivity,
               "binding Reset leaves FOV, Display and explicit sensitivities alone");
-        mouse_settings=click_rect(panel.sensitivity_control_rect(SensitivityControl::reset));
+        mouse_settings=click_rect(panel.sensitivity_control_rect(SensitivityControl::normal_reset));
+        check(mouse_settings.sensitivity && mouse_settings.sensitivity->normal==nova::input::default_mouse_sensitivity &&
+              mouse_settings.sensitivity->aim_multiplier==2.f,"base reset preserves aim multiplier");
+        mouse_settings=click_rect(panel.sensitivity_control_rect(SensitivityControl::ads_reset));
         check(mouse_settings.sensitivity==nova::input::MouseSensitivity{} && !mouse_settings.bindings &&
               mouse_settings.visible==optics_before && !mouse_settings.save && !mouse_settings.display &&
               !mouse_settings.apply_render && persistence_calls==saves_before,
@@ -907,7 +928,7 @@ void rendering(const std::filesystem::path &output,const std::filesystem::path &
         mouse(SDL_EVENT_MOUSE_BUTTON_UP,(sensitivity_rect.x1+sensitivity_rect.x2)*.5f,sensitivity_y); build();
         click_rect(panel.display_control_rect(DisplayControl::gameplay_tab)); build(); build();
     }
-    const float close_x=panel.control_rect(FovControl::world_slider).x2+10;
+    const float close_x=panel.control_rect(FovControl::world_reset).x2+10;
     mouse(SDL_EVENT_MOUSE_MOTION,close_x,65); build(); mouse(SDL_EVENT_MOUSE_BUTTON_DOWN,close_x,65); build();
     mouse(SDL_EVENT_MOUSE_BUTTON_UP,close_x,65); command=build();
     check(command.closed && !panel.visible(),"normal window X closes compact panel");

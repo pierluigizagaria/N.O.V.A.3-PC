@@ -108,10 +108,12 @@ bool reset_button(const char *id,const char *tooltip,float scale) {
     return pressed;
 }
 bool row(const char *name,std::optional<float> &value,float &seed,float maximum,
-         FovUiRect &rect,bool &invalid,bool &edit_pending,bool &active_edit,float scale) {
+         FovUiRect &rect,FovUiRect &reset_rect,float default_value,bool &invalid,
+         bool &edit_pending,bool &active_edit,bool &reset,float scale) {
     ImGui::PushID(name);
     ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted(name);
-    ImGui::SameLine(130*scale); ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::SameLine(130*scale);
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x);
     if(value) seed=*value;
     const auto previous_seed=seed;
     if(ImGui::SliderFloat("##value",&seed,60,maximum,"%.1f",ImGuiSliderFlags_AlwaysClamp)) {
@@ -121,8 +123,14 @@ bool row(const char *name,std::optional<float> &value,float &seed,float maximum,
     }
     rectangle(rect);
     active_edit|=ImGui::IsItemActive();
-    const bool completed=ImGui::IsItemDeactivatedAfterEdit() && edit_pending && !invalid;
+    bool completed=ImGui::IsItemDeactivatedAfterEdit() && edit_pending && !invalid;
     if(completed) edit_pending=false;
+    ImGui::SameLine();
+    if(reset_button("##reset","Reset to default",scale)) {
+        value.reset(); seed=default_value; invalid=false;
+        edit_pending=false; completed=true; reset=true;
+    }
+    rectangle(reset_rect);
     ImGui::PopID();
     return completed;
 }
@@ -341,12 +349,17 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                 if(gameplay_tab) {
                     sensitivity_edit_.finish();
                     binding_capture_.cancel();
-                    command.save|=row("FOV",options_.world,world_seed_,120,controls_[0],world_invalid_,edit_pending_,active_edit,scale);
-                    command.save|=row("Weapon FOV",options_.weapon,weapon_seed_,104,controls_[1],weapon_invalid_,edit_pending_,active_edit,scale);
+                    command.save|=row("FOV",options_.world,world_seed_,120,controls_[0],
+                        controls_[static_cast<size_t>(FovControl::world_reset)],defaults ? defaults->world : world_seed_,
+                        world_invalid_,edit_pending_,active_edit,reset,scale);
+                    command.save|=row("Weapon FOV",options_.weapon,weapon_seed_,104,controls_[1],
+                        controls_[static_cast<size_t>(FovControl::weapon_reset)],defaults ? defaults->weapon : weapon_seed_,
+                        weapon_invalid_,edit_pending_,active_edit,reset,scale);
                     // No row is emitted while the real native binding is absent.
                     if constexpr(movement_wobble::kControlAvailable) {
                         ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Camera bob");
-                        ImGui::SameLine(130*scale); ImGui::SetNextItemWidth(-FLT_MIN);
+                        ImGui::SameLine(130*scale);
+                        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x);
                         if(ImGui::SliderInt("##movement_wobble",&movement_wobble_seed_,0,100,"%d%%",ImGuiSliderFlags_AlwaysClamp))
                             movement_edit_pending_=true;
                         rectangle(controls_[static_cast<size_t>(FovControl::movement_slider)]);
@@ -355,6 +368,13 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                             command.movement_wobble=movement_wobble::Strength::from_percent(movement_wobble_seed_);
                             movement_edit_pending_=false;
                         }
+                        ImGui::SameLine();
+                        if(reset_button("##reset_bob","Reset camera bob",scale)) {
+                            movement_wobble_seed_=movement_wobble::kResetPercent;
+                            movement_edit_pending_=movement_save_pending_=false;
+                            command.movement_wobble=movement_wobble::Strength{};
+                        }
+                        rectangle(controls_[static_cast<size_t>(FovControl::movement_reset)]);
                         if(!frame.movement_wobble_error.empty()) {
                             ImGui::TextWrapped("Could not save movement wobble: %s",frame.movement_wobble_error.c_str());
                             if(ImGui::Button("Retry movement save"))
@@ -364,12 +384,15 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                     if constexpr(weapon_placement::kPositionControlAvailable) {
                         auto position_row=[&](const char *label,float &coordinate) {
                             float percent=coordinate*100.f;
-                            ImGui::TextUnformatted(label); ImGui::SetNextItemWidth(-FLT_MIN);
+                            ImGui::TextUnformatted(label);
+                            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x);
                             ImGui::PushID(label);
                             if(ImGui::SliderFloat("##position",&percent,-5.f,5.f,"%+.2f%%",ImGuiSliderFlags_AlwaysClamp)) {
                                 const auto fraction=percent/100.f;
                                 if(weapon_placement::valid({fraction,0})) coordinate=fraction;
                             }
+                            ImGui::SameLine();
+                            if(reset_button("##reset_position","Reset weapon position",scale)) coordinate=0;
                             ImGui::PopID();
                         };
                         position_row("Weapon position X (right +)",weapon_position_draft_.x);
@@ -383,21 +406,6 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                                 command.weapon_position=weapon_position_requested_.requested();
                         }
                     }
-                    if(ImGui::Button("Reset")) {
-                        if constexpr(weapon_placement::kPositionControlAvailable) {
-                            weapon_position_requested_.reset(); weapon_position_draft_={};
-                            command.weapon_position=weapon_position_requested_.requested();
-                        }
-                        options_={}; world_invalid_=weapon_invalid_=false;
-                        if constexpr(movement_wobble::kControlAvailable) {
-                            movement_wobble_seed_=movement_wobble::kResetPercent;
-                            movement_edit_pending_=movement_save_pending_=false;
-                            command.movement_wobble=movement_wobble::Strength{};
-                        }
-                        if(defaults) { world_seed_=defaults->world; weapon_seed_=defaults->weapon; }
-                        edit_pending_=save_pending_=false; command.save=true; reset=true;
-                    }
-                    rectangle(controls_[static_cast<size_t>(FovControl::reset)]);
                     ImGui::EndTabItem();
                 }
                 const bool display_tab=ImGui::BeginTabItem("Display");
@@ -412,16 +420,12 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                         command.save=true; edit_pending_=false;
                     }
                     auto display=frame.display;
-                    if(ImGui::Checkbox("Fullscreen",&display.fullscreen)) {
-                        display.fullscreen_resolution={}; command.display=display;
-                    }
-                    rectangle(display_controls_[static_cast<size_t>(DisplayControl::fullscreen)]);
                     const auto selected=frame.render_extent;
                     const auto label=render_extent_name(selected)+(selected!=frame.active_render_extent ? " *" : "");
                     ImGui::AlignTextToFramePadding();
                     ImGui::TextUnformatted("Resolution");
                     ImGui::SameLine(130*scale); ImGui::SetNextItemWidth(-FLT_MIN);
-                    ImGui::BeginDisabled(frame.render_busy || frame.render_confirming);
+                    ImGui::BeginDisabled(!frame.render_available || frame.render_busy || frame.render_confirming);
                     const bool combo=ImGui::BeginCombo("##resolution",label.c_str());
                     rectangle(display_controls_[static_cast<size_t>(DisplayControl::resolution)]);
                     if(combo) {
@@ -430,7 +434,10 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                             const bool current=choice==selected;
                             auto name=render_extent_name(choice);
                             if(entry.recommended) name+=" (Recommended)";
-                            if(ImGui::Selectable(name.c_str(),current) && !current) command.render_extent=choice;
+                            if(ImGui::Selectable(name.c_str(),current) &&
+                               (!current || selected!=frame.active_render_extent || frame.render_unsaved)) {
+                                command.render_extent=choice; command.apply_render=true;
+                            }
                             if(choice==GuestExtent{1600,900})
                                 rectangle(display_controls_[static_cast<size_t>(DisplayControl::first_resolution)]);
                             if(choice==GuestExtent{1920,1080})
@@ -440,16 +447,16 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                         ImGui::EndCombo();
                     }
                     ImGui::EndDisabled();
-                    ImGui::BeginDisabled(!frame.render_available || frame.render_busy || frame.render_confirming ||
-                        (selected==frame.active_render_extent && !frame.render_unsaved));
-                    if(ImGui::Button(frame.render_busy ? "Applying..." : "Apply")) command.apply_render=true;
-                    rectangle(display_controls_[static_cast<size_t>(DisplayControl::apply)]);
-                    ImGui::EndDisabled();
+                    if(ImGui::Checkbox("Fullscreen",&display.fullscreen)) {
+                        display.fullscreen_resolution={}; command.display=display;
+                    }
+                    rectangle(display_controls_[static_cast<size_t>(DisplayControl::fullscreen)]);
                     if(!frame.render_error.empty()) ImGui::TextWrapped("%s",frame.render_error.c_str());
                     if(!frame.display_error.empty()) ImGui::TextWrapped("%s",frame.display_error.c_str());
                     ImGui::Separator();
                     ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("HUD scale");
-                    ImGui::SameLine(130*scale); ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::SameLine(130*scale);
+                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x);
                     if(ImGui::SliderInt("##ui_scale",&ui_scale_seed_,ui::minimum_percent,ui::maximum_percent,"%d%%",ImGuiSliderFlags_AlwaysClamp)) {
                         command.ui_scale=ui_scale_seed_; ui_scale_pending_=true;
                     }
@@ -458,7 +465,8 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                     if(ImGui::IsItemDeactivatedAfterEdit() && ui_scale_pending_) {
                         command.ui_scale=ui_scale_seed_; command.save_ui_scale=true; ui_scale_pending_=false;
                     }
-                    if(ImGui::Button("Reset HUD scale")) {
+                    ImGui::SameLine();
+                    if(reset_button("##reset_hud","Reset HUD scale",scale)) {
                         ui_scale_seed_=ui::default_percent; command.ui_scale=ui_scale_seed_;
                         command.save_ui_scale=true; ui_scale_pending_=false;
                     }
@@ -479,45 +487,42 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                 if(graphics_tab) {
                     binding_capture_.cancel();
                     ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Detail distance");
-                    ImGui::SameLine(190*scale); ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x);
+                    ImGui::SameLine(190*scale); ImGui::SetNextItemWidth(-FLT_MIN);
                     const char *distances[]={"1x (Original)","2x","3x","4x (Best)"};
-                    if(ImGui::BeginCombo("##lod_distance",distances[graphics_selected_.lod_distance-1])) {
+                    const auto distance_label=std::string(distances[graphics_selected_.lod_distance-1])+
+                        (graphics_selected_.lod_distance!=graphics_startup_.lod_distance ? " *" : "");
+                    if(ImGui::BeginCombo("##lod_distance",distance_label.c_str())) {
                         for(int i=1;i<=4;++i) {
                             if(ImGui::Selectable(distances[i-1],graphics_selected_.lod_distance==i)) {
                                 graphics_selected_.lod_distance=i;command.graphics_quality=graphics_selected_;
                             }
                             if(i==1) rectangle(display_controls_[static_cast<size_t>(DisplayControl::lod_original)]);
+                            if(i==4) rectangle(display_controls_[static_cast<size_t>(DisplayControl::lod_best)]);
                         }
                         ImGui::EndCombo();
                     }
                     rectangle(display_controls_[static_cast<size_t>(DisplayControl::lod_distance)]);
                     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Multiplier of the original camera-to-object detail thresholds.");
-                    ImGui::SameLine();
-                    if(reset_button("##reset_lod","Reset detail distance to 4x (default)",scale)) {
-                        graphics_selected_.lod_distance=GraphicsQuality{}.lod_distance;command.graphics_quality=graphics_selected_;
-                    }
-                    rectangle(display_controls_[static_cast<size_t>(DisplayControl::lod_reset)]);
                     ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Texture filtering");
-                    ImGui::SameLine(190*scale); ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x);
+                    ImGui::SameLine(190*scale); ImGui::SetNextItemWidth(-FLT_MIN);
                     const char *textures[]={"Original","Trilinear","Trilinear + 16x"};
-                    if(ImGui::BeginCombo("##texture_filtering",textures[graphics_selected_.texture_filtering])) {
+                    const auto texture_label=std::string(textures[graphics_selected_.texture_filtering])+
+                        (graphics_selected_.texture_filtering!=graphics_startup_.texture_filtering ? " *" : "");
+                    if(ImGui::BeginCombo("##texture_filtering",texture_label.c_str())) {
                         for(int i=0;i<3;++i) {
                             if(ImGui::Selectable(textures[i],graphics_selected_.texture_filtering==i)) {
                                 graphics_selected_.texture_filtering=i;command.graphics_quality=graphics_selected_;
                             }
                             if(i==0) rectangle(display_controls_[static_cast<size_t>(DisplayControl::texture_original)]);
+                            if(i==2) rectangle(display_controls_[static_cast<size_t>(DisplayControl::texture_best)]);
                         }
                         ImGui::EndCombo();
                     }
                     rectangle(display_controls_[static_cast<size_t>(DisplayControl::texture_filtering)]);
                     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Anisotropy uses up to 16x, limited by your GPU. Original texture resolution is preserved.");
-                    ImGui::SameLine();
-                    if(reset_button("##reset_texture","Reset texture filtering to trilinear + 16x (default)",scale)) {
-                        graphics_selected_.texture_filtering=GraphicsQuality{}.texture_filtering;command.graphics_quality=graphics_selected_;
+                    if(graphics_selected_!=graphics_startup_) {
+                        ImGui::Spacing(); ImGui::TextUnformatted("Restart required");
                     }
-                    rectangle(display_controls_[static_cast<size_t>(DisplayControl::texture_reset)]);
-                    ImGui::Spacing();
-                    ImGui::TextWrapped(graphics_selected_==graphics_startup_ ? "These two settings apply after restarting the game." : "Restart the game to apply the selected quality settings.");
                     if(!frame.graphics_quality_error.empty()) {
                         ImGui::TextWrapped("Could not save graphics quality: %s",frame.graphics_quality_error.c_str());
                         if(ImGui::Button("Retry quality save")) command.graphics_quality=graphics_selected_;
@@ -537,7 +542,8 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                     auto sensitivity_row=[&](const char *label,float &value,SensitivityControl control) {
                         ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted(label);
                         if(ImGui::GetContentRegionAvail().x>=400*scale) ImGui::SameLine(200*scale);
-                        ImGui::SetNextItemWidth(-FLT_MIN); ImGui::PushID(label);
+                        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x);
+                        ImGui::PushID(label);
                         const auto before=value;
                         const bool multiplier=control==SensitivityControl::ads;
                         auto displayed=multiplier ? value : input::mouse_fps_units(value);
@@ -553,12 +559,16 @@ FovCommands FovPanel::ui_frame(const FovUiFrame &frame) {
                             "0.00x = no mouse aim movement. 1.00x = original weapon and zoom sensitivity. 2.00x = double. Ctrl+click to type a value." :
                             "1.00 = 0.022 degrees per mouse count. Also controls aiming speed. Ctrl+click to type a value.");
                         if(ImGui::IsItemDeactivatedAfterEdit()) sensitivity_edit_.finish();
+                        ImGui::SameLine();
+                        if(reset_button("##reset_sensitivity","Reset to default",scale)) {
+                            value=multiplier ? input::MouseSensitivity{}.aim_multiplier : input::MouseSensitivity{}.normal;
+                            sensitivity_edit_.edit(sensitivity); sensitivity_edit_.finish();
+                        }
+                        rectangle(sensitivity_rects_[static_cast<size_t>(multiplier ? SensitivityControl::ads_reset : SensitivityControl::normal_reset)]);
                         ImGui::PopID();
                     };
                     sensitivity_row("Mouse sensitivity",sensitivity.normal,SensitivityControl::normal);
                     sensitivity_row("Aim multiplier",sensitivity.aim_multiplier,SensitivityControl::ads);
-                    if(ImGui::Button("Reset mouse")) sensitivity_edit_.reset();
-                    rectangle(sensitivity_rects_[static_cast<size_t>(SensitivityControl::reset)]);
                     ImGui::EndDisabled();
                     ImGui::Separator();
                     if(binding_capture_.active()) {

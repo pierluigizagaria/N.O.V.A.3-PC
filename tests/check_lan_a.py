@@ -9,6 +9,7 @@ from pathlib import Path
 import queue
 import re
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -219,7 +220,18 @@ def main():
     try:
         args.exe = args.exe.resolve(strict=True)
         args.fixture = args.fixture.resolve(strict=True)
-        return run(args)
+        # Each attempt owns a fresh directory. Successful diagnostics disappear;
+        # failures are printed by the runner and CTest retains its latest result.
+        args.logs.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='run-', dir=args.logs) as work:
+            args.logs = Path(work) / 'logs'
+            try:
+                return run(args)
+            except (RuntimeError, subprocess.TimeoutExpired, OSError):
+                for path in sorted(args.logs.glob('*')):
+                    if path.is_file():
+                        print(path.name + ':\n' + path.read_text(errors='replace')[-2048:])
+                raise
     except (RuntimeError, subprocess.TimeoutExpired, OSError) as error:
         print("FAIL LAN-A:", error)
         return 1

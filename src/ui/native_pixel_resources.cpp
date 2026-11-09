@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <mutex>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 namespace nova::ui {
 namespace {
@@ -38,7 +39,7 @@ struct NativePixelResources::Impl {
             abi::call_guest_u64(s.original,args,7);
             loading->profile=*reinterpret_cast<uint8_t*>(s.profile);
             const auto actual_count=word(s.selector_count);
-            word(s.width)=1920;word(s.height)=1080;
+            word(s.width)=1280;word(s.height)=720;
             const auto result=abi::call_guest_u64(s.original,args,7);
             *reinterpret_cast<uint8_t*>(s.profile)=loading->profile;
             word(s.selector_count)=actual_count;
@@ -52,16 +53,20 @@ NativePixelResources::NativePixelResources(const ElfImage& image):impl_(std::mak
 NativePixelResources::~NativePixelResources()=default;
 uint32_t NativePixelResources::load(uint32_t original,const uint32_t* args) {
     auto* s=Impl::active;
-    // Cover resources deliberately retain full-screen extent semantics.
-    if(!s || (args[4]&255) || Impl::loading || menu::NativeMenuObserver::loading() || !word(s->height))return abi::call_guest(original,args,6);
+    // A shared menu/font must never enter the fixed HUD resource cache merely
+    // because it was first loaded outside CMenuManager::Load. Coverage and
+    // weapon-specific reticles also retain their original native metrics.
+    const auto name=reinterpret_cast<const char*>(args[1]);
+    const bool hud=name && (!_stricmp(name,"hud3d.bsprite") || !_stricmp(name,"controls.bsprite"));
+    if(!s || !hud || (args[2]&255) || (args[4]&255) || Impl::loading || menu::NativeMenuObserver::loading() || !word(s->height))return abi::call_guest(original,args,6);
     std::lock_guard guard(s->mutex);
     Impl::Loading scope{word(s->width),word(s->height),*reinterpret_cast<uint8_t*>(s->profile),Impl::loading};
-    if(scope.width==1920 && scope.height==1080)return abi::call_guest(original,args,6);
+    if(scope.width==1280 && scope.height==720)return abi::call_guest(original,args,6);
     struct Restore {
         Impl& s;Impl::Loading& scope;
         ~Restore(){word(s.width)=scope.width;word(s.height)=scope.height;*reinterpret_cast<uint8_t*>(s.profile)=scope.profile;Impl::loading=scope.previous;}
     } restore{*s,scope};
-    Impl::loading=&scope;word(s->width)=1920;word(s->height)=1080;
+    Impl::loading=&scope;word(s->width)=1280;word(s->height)=720;
     return abi::call_guest(original,args,6);
 }
 }

@@ -205,6 +205,44 @@ class LauncherTests(unittest.TestCase):
         self.write_spec()
         self.run_probe(expect=1)
 
+    def test_deflate_exact_input_and_output_boundary(self):
+        # A non-final DEFLATE chunk consumes and produces exactly 128 KiB.
+        # The next inflate call needs more input, which is not corruption.
+        compressor = zlib.compressobj(wbits=-15)
+        raw = compressor.compress(bytes(20)) + compressor.flush(zlib.Z_SYNC_FLUSH)
+        self.library = bytes(20)
+        for size in (65535, 65517):
+            raw += b'\0' + struct.pack('<HH', size, size ^ 65535) + b'X' * size
+            self.library += b'X' * size
+        self.assertEqual(len(raw), 128 * 1024)
+        self.assertEqual(len(self.library), 128 * 1024)
+        raw += b'\x01\x04\x00\xfb\xfftail'  # Final stored block.
+        self.library += b'tail'
+        self.assertEqual(zlib.decompress(raw, -15), self.library)
+        name = LIBRARY.encode('ascii')
+        crc = zlib.crc32(self.library)
+        for label, payload, expected in (
+                ('valid', raw, 0), ('unfinished', raw[:-9], 1),
+                ('trailing', raw + b'extra', 1), ('invalid-block', b'\x07' + raw[1:], 1)):
+            with self.subTest(stream=label):
+                self.root = self.base / label
+                self.root.mkdir()
+                local = struct.pack('<IHHHHHIIIHH', 0x04034b50, 20, 0, 8, 0, 0,
+                                    crc, len(payload), len(self.library), len(name), 0) + name + payload
+                central = struct.pack('<IHHHHHHIIIHHHHHII', 0x02014b50, 20, 20, 0, 8, 0, 0,
+                                      crc, len(payload), len(self.library), len(name), 0, 0, 0, 0, 0, 0) + name
+                self.apk.write_bytes(local + central + struct.pack('<IHHHHIIH', 0x06054b50,
+                                     0, 0, 1, 1, len(central), len(local), 0))
+                self.write_spec()
+                self.run_probe(expect=expected)
+                library = self.root / 'local/input' / LIBRARY
+                if expected == 0:
+                    self.assertEqual(library.read_bytes(), self.library)
+                else:
+                    self.assertFalse(library.exists())
+                    self.assertFalse(self.receipt.exists())
+                    self.assertFalse(list(self.root.rglob('*.part-*')))
+
     def test_encrypted_member_rejected(self):
         content = bytearray(self.apk.read_bytes())
         central = content.index(b'PK\x01\x02')
@@ -238,6 +276,19 @@ class LauncherTests(unittest.TestCase):
         (self.root / 'fail-child').touch()
         result = subprocess.run([str(PROBE), 'launch', str(self.root), str(CHILD)], capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 7, result.stderr)
+
+    def test_game_log_retention_preserves_unrelated_files(self):
+        directory = self.root / 'local/logs/launcher'
+        directory.mkdir(parents=True)
+        for index in range(8):
+            (directory / f'game-100-{index}.log').write_text('old session')
+        unrelated = directory / 'operator-notes.log'
+        unrelated.write_text('keep')
+        result = subprocess.run([str(PROBE), 'launch', str(self.root), str(CHILD)],
+                                capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(list(directory.glob('game-*.log'))), 3)
+        self.assertEqual(unrelated.read_text(), 'keep')
 
     def test_system_language_mapping_and_complete_catalogues(self):
         result = subprocess.run([str(PROBE), 'language'], capture_output=True, timeout=10)

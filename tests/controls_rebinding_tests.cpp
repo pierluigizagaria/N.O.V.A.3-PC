@@ -253,9 +253,9 @@ void runtime_and_owner() {
     ControlsConfig initial;
     Controls controls(initial); controls.gameplay=true;
     auto remapped=initial;
-    check(rebind(remapped,Action::aim,{BindingKind::key,SDLK_C}).empty(),"keyboard held aim mapping");
+    check(rebind(remapped,Action::aim,{BindingKind::key,SDLK_B}).empty(),"keyboard held aim mapping");
     controls.replace_bindings(remapped);
-    controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_C));
+    controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_B));
     NativeAimIntent intent; intent.sample(controls.take().down(Action::aim));
     check(intent.wanted() && !intent.permit_start(false,false,true,true),"held desire survives native refusal");
     intent.sample(controls.take().down(Action::aim));
@@ -263,12 +263,12 @@ void runtime_and_owner() {
     controls.replace_bindings(remapped);
     controls.clear();
     check(controls.take().held.none(),"map replacement releases pending held and edge state");
-    controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_C,true));
+    controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_B,true));
     check(!controls.take().down(Action::aim),"held autorepeat cannot reactivate replaced binding");
-    controls.handle(key(SDL_EVENT_KEY_UP,SDLK_C));
-    controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_C));
+    controls.handle(key(SDL_EVENT_KEY_UP,SDLK_B));
+    controls.handle(key(SDL_EVENT_KEY_DOWN,SDLK_B));
     check(controls.take().down(Action::aim),"release then fresh press rearms mapped aim");
-    controls.handle(key(SDL_EVENT_KEY_UP,SDLK_C));
+    controls.handle(key(SDL_EVENT_KEY_UP,SDLK_B));
     intent.sample(controls.take().down(Action::aim));
     check(!intent.wanted() && intent.permit_exit(),"physical release still owns C04 exit desire");
 

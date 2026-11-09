@@ -15,7 +15,8 @@ bool panel_movement(Action a) {
 }
 constexpr const char *names[] = {"forward", "left", "back", "right", "sprint", "jump",
     "reload", "grenade", "interact", "melee", "power", "fire", "aim", "next", "previous",
-    "slot1", "slot2", "slot3", "slot4", "slot5", "chat", "scores"};
+    "slot1", "slot2", "slot3", "slot4", "slot5", "chat", "scores",
+    "previous_power", "next_power", "next_grenade"};
 Action action(const std::string &name) {
     for (size_t i = 0; i < action_count; ++i)
         if (name == names[i]) return static_cast<Action>(i);
@@ -47,12 +48,14 @@ SDL_Keycode key_code(const std::string &name) {
 ControlsConfig::ControlsConfig() {
     keys = {{SDLK_W,Action::forward},{SDLK_A,Action::left},{SDLK_S,Action::back},
         {SDLK_D,Action::right},{SDLK_LSHIFT,Action::sprint},{SDLK_RSHIFT,Action::sprint},
-        {SDLK_SPACE,Action::jump},{SDLK_R,Action::reload},{SDLK_G,Action::grenade},
+        {SDLK_SPACE,Action::jump},{SDLK_R,Action::reload},
         {SDLK_E,Action::interact},{SDLK_F,Action::melee},{SDLK_Q,Action::power},
         {SDLK_1,Action::slot1},{SDLK_2,Action::slot2},{SDLK_3,Action::slot3},
         {SDLK_4,Action::slot4},{SDLK_5,Action::slot5},
-        {SDLK_V,Action::chat},{SDLK_TAB,Action::scores}};
-    buttons = {{SDL_BUTTON_LEFT,Action::fire},{SDL_BUTTON_RIGHT,Action::aim}};
+        {SDLK_V,Action::chat},{SDLK_TAB,Action::scores},
+        {SDLK_Z,Action::previous_power},{SDLK_X,Action::next_power},{SDLK_C,Action::next_grenade}};
+    buttons = {{SDL_BUTTON_LEFT,Action::fire},{SDL_BUTTON_RIGHT,Action::aim},
+        {SDL_BUTTON_MIDDLE,Action::grenade}};
 }
 ControlsConfig ControlsConfig::parse(std::istream &stream) {
     ControlsConfig result;
@@ -378,13 +381,15 @@ bool Controls::take_pressed(Action action) {
 }
 const char *action_label(Action a) {
     static constexpr const char *labels[]={"Forward","Left","Backward","Right",
-        "Sprint","Jump","Reload","Grenade","Interact","Melee","Power",
+        "Sprint","Jump","Reload","Grenade / mine","Interact","Melee","Use power",
         "Fire","Aim","Next weapon","Previous weapon",
-        "Weapon 1","Weapon 2","Weapon 3","Weapon 4","Weapon 5","Voice lines","Scoreboard"};
+        "Weapon 1","Weapon 2","Weapon 3","Weapon 4","Weapon 5","Voice lines","Scoreboard",
+        "Previous power","Next power","Next grenade"};
     return static_cast<size_t>(a)<action_count ? labels[static_cast<size_t>(a)] : "Unbound";
 }
 const char *action_contexts(Action a) {
     switch(a) {
+    case Action::grenade: return "Click to throw a grenade or place a mine; hold to detonate mines";
     case Action::left: case Action::right: return "On foot, mech, jeep driving and bike";
     case Action::forward: case Action::back: return "On foot, mech and jeep driving";
     case Action::fire: return "On foot; primary fire in mech, jeep, mounted gun and bike";

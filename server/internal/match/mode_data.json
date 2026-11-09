@@ -1,0 +1,442 @@
+{
+  "schema_version": 1,
+  "library_sha256": "a672cf14e27f1c188edd97d85d220becd99e641ad9cb552987512d5ef90e102e",
+  "world_sha256": "26527276476c4e18b63b3b12f33b20925a63b30a5359d4a2d19a1e3cda628ff3",
+  "rules": {
+    "freeze_rescue_distance_squared": 16.0,
+    "overtime_minutes": 3,
+    "point_ready_ms": 1000,
+    "spawn_teammate_clearance": 3.0,
+    "spawn_objective_enemy_clearance": 5.0,
+    "spawn_fallback_count": 12,
+    "freeze_rescue_ms": 3000,
+    "freeze_round_settle_ms": 500,
+    "point_hold_ms": 20000,
+    "point_maximum": 100.0,
+    "point_snapshot_scale": 10000.0,
+    "flag_home_tolerance": 1.0,
+    "flag_return_tolerance": 0.10000000149011612
+  },
+  "rewards": {
+    "flag_pick": 10,
+    "flag_return": 20,
+    "flag_capture": 30,
+    "point_capture": 20,
+    "point_enemy_capture": 30,
+    "point_score": 20,
+    "freeze_first": 10,
+    "freeze_streak": 10,
+    "unfreeze_first": 10,
+    "unfreeze_streak": 10
+  },
+  "maps": [
+    {
+      "map": 0,
+      "flags": [
+        {
+          "object": 20118,
+          "zone": 20010,
+          "position": [
+            -7.867000102996826,
+            30.121999740600586,
+            -3.8570001125335693
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        },
+        {
+          "object": 20114,
+          "zone": 20035,
+          "position": [
+            186.74000549316406,
+            50.01499938964844,
+            -21.993999481201172
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        }
+      ],
+      "bases": [
+        {
+          "object": 20117,
+          "zone": 20010,
+          "position": [
+            -7.867000102996826,
+            30.121999740600586,
+            -3.8570001125335693
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        },
+        {
+          "object": 20115,
+          "zone": 20035,
+          "position": [
+            186.74000549316406,
+            50.01499938964844,
+            -21.993999481201172
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        }
+      ],
+      "points": [
+        {
+          "object": 20088,
+          "zone": 20003,
+          "position": [
+            10.607999801635742,
+            14.083999633789062,
+            -2.436000108718872
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 1,
+          "rate": 10.0,
+          "threshold": 40
+        },
+        {
+          "object": 20086,
+          "zone": 20028,
+          "position": [
+            169.0330047607422,
+            9.843999862670898,
+            -20.827999114990234
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 2,
+          "rate": 10.0,
+          "threshold": 40
+        },
+        {
+          "object": 20087,
+          "zone": 20158,
+          "position": [
+            79.73699951171875,
+            105.65699768066406,
+            -6.9019999504089355
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 10.0,
+          "threshold": 40
+        }
+      ]
+    },
+    {
+      "map": 1,
+      "flags": [
+        {
+          "object": 20014,
+          "zone": 160044,
+          "position": [
+            -27.579999923706055,
+            167.72300720214844,
+            6.723999977111816
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        },
+        {
+          "object": 20001,
+          "zone": 160044,
+          "position": [
+            -37.46699905395508,
+            -39.573001861572266,
+            6.715000152587891
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        }
+      ],
+      "bases": [
+        {
+          "object": 20015,
+          "zone": 160044,
+          "position": [
+            -27.579999923706055,
+            167.72300720214844,
+            6.723999977111816
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        },
+        {
+          "object": 20002,
+          "zone": 160044,
+          "position": [
+            -37.46699905395508,
+            -39.573001861572266,
+            6.715000152587891
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        }
+      ],
+      "points": [
+        {
+          "object": 210005,
+          "zone": 160044,
+          "position": [
+            26.43899917602539,
+            140.75399780273438,
+            0.02199999988079071
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 20.0,
+          "threshold": 40
+        },
+        {
+          "object": 210006,
+          "zone": 160044,
+          "position": [
+            -43.861000061035156,
+            62.88600158691406,
+            0.5040000081062317
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 20.0,
+          "threshold": 40
+        },
+        {
+          "object": 210007,
+          "zone": 160044,
+          "position": [
+            -111.76300048828125,
+            -0.3179999887943268,
+            0.04500000178813934
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 20.0,
+          "threshold": 40
+        }
+      ]
+    },
+    {
+      "map": 2,
+      "flags": [
+        {
+          "object": 20311,
+          "zone": 230041,
+          "position": [
+            -216.36900329589844,
+            74.5270004272461,
+            8.85200023651123
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        },
+        {
+          "object": 20313,
+          "zone": 230050,
+          "position": [
+            214.0189971923828,
+            -27.363000869750977,
+            8.85200023651123
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        }
+      ],
+      "bases": [
+        {
+          "object": 20312,
+          "zone": 230041,
+          "position": [
+            -216.36900329589844,
+            74.5270004272461,
+            8.85200023651123
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        },
+        {
+          "object": 20314,
+          "zone": 230050,
+          "position": [
+            214.0189971923828,
+            -27.363000869750977,
+            8.85200023651123
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        }
+      ],
+      "points": [
+        {
+          "object": 210006,
+          "zone": 230043,
+          "position": [
+            -131.00399780273438,
+            4.486999988555908,
+            1.6619999408721924
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 10.0,
+          "threshold": 40
+        },
+        {
+          "object": 210003,
+          "zone": 230048,
+          "position": [
+            123.26000213623047,
+            36.303001403808594,
+            1.6699999570846558
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 10.0,
+          "threshold": 40
+        },
+        {
+          "object": 161742,
+          "zone": 230075,
+          "position": [
+            -1.1779999732971191,
+            23.31599998474121,
+            22.469999313354492
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 10.0,
+          "threshold": 40
+        }
+      ]
+    },
+    {
+      "map": 3,
+      "flags": [],
+      "bases": [],
+      "points": []
+    },
+    {
+      "map": 4,
+      "flags": [
+        {
+          "object": 220024,
+          "zone": 160886,
+          "position": [
+            -24.56399917602539,
+            -210.68600463867188,
+            29.26099967956543
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        },
+        {
+          "object": 220026,
+          "zone": 160886,
+          "position": [
+            -21.35099983215332,
+            171.83200073242188,
+            29.406999588012695
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        }
+      ],
+      "bases": [
+        {
+          "object": 220025,
+          "zone": 160886,
+          "position": [
+            -24.576000213623047,
+            -210.7220001220703,
+            29.26099967956543
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 1
+        },
+        {
+          "object": 220027,
+          "zone": 160886,
+          "position": [
+            -21.363000869750977,
+            171.80799865722656,
+            29.26099967956543
+          ],
+          "enabled": true,
+          "radius": 2.0,
+          "team": 2
+        }
+      ],
+      "points": [
+        {
+          "object": 220006,
+          "zone": 160886,
+          "position": [
+            76.34500122070312,
+            -124.75499725341797,
+            36.055999755859375
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 10.0,
+          "threshold": 40
+        },
+        {
+          "object": 220007,
+          "zone": 160886,
+          "position": [
+            -124.66699981689453,
+            85.80000305175781,
+            36.055999755859375
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 10.0,
+          "threshold": 40
+        },
+        {
+          "object": 220008,
+          "zone": 160886,
+          "position": [
+            -25.35099983215332,
+            -18.863000869750977,
+            17.1560001373291
+          ],
+          "enabled": true,
+          "radius": 5.0,
+          "team": 0,
+          "rate": 10.0,
+          "threshold": 40
+        }
+      ]
+    },
+    {
+      "map": 5,
+      "flags": [],
+      "bases": [],
+      "points": []
+    }
+  ]
+}

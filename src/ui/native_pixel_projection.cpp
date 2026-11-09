@@ -18,6 +18,7 @@ struct NativePixelProjection::Scope::State {
     State* previous=nullptr;
     std::unordered_map<uint32_t,uint32_t> pivots;
     std::unordered_map<uint32_t,std::array<float,2>> anchors;
+    std::unordered_map<uint32_t,std::array<float,2>> edges;
     uint32_t driver=0;
     PixelMatrix projection{};
     float factor=1;
@@ -52,6 +53,13 @@ struct NativePixelProjection::Impl {
                     auto wanted=s->projection;
                     const auto found=s->pivots.find(supplied);
                     if(found!=s->pivots.end()) {
+                        const auto edge=s->edges.find(found->second);
+                        if(edge!=s->edges.end()) {
+                            const auto adjusted=pixel_projection_at(s->projection,edge->second,s->factor);
+                            if(!adjusted)throw std::runtime_error("GUI edge projection invalid");
+                            s->anchors[found->second]=edge->second;
+                            wanted=*adjusted;
+                        } else {
                         const auto world=matrix(found->second+0x10);
                         const PixelVector pivot{world[12],world[13],world[14],1};
                         const auto view=matrix(driver+0x16c);
@@ -60,6 +68,7 @@ struct NativePixelProjection::Impl {
                         const auto clip=project_vector(s->projection,project_vector(view,pivot));
                         s->anchors[found->second]={clip[0]/clip[3],clip[1]/clip[3]};
                         wanted=*adjusted;
+                        }
                     }
                     if(matrix(driver+0x1ac)!=wanted)publish(driver,wanted);
                     s->changed=wanted!=s->projection;
@@ -73,9 +82,11 @@ NativePixelProjection::Impl* NativePixelProjection::Impl::active=nullptr;
 thread_local NativePixelProjection::Scope::State* NativePixelProjection::Impl::current=nullptr;
 NativePixelProjection::NativePixelProjection(const ElfImage& image):impl_(std::make_unique<Impl>(image)){}
 NativePixelProjection::~NativePixelProjection()=default;
-NativePixelProjection::Scope::Scope(const std::vector<uint32_t>& groups,float factor,const std::unordered_map<uint32_t,uint32_t>& shared_pivots) {
+NativePixelProjection::Scope::Scope(const std::vector<uint32_t>& groups,float factor,const std::unordered_map<uint32_t,uint32_t>& shared_pivots,
+        const std::unordered_map<uint32_t,std::array<float,2>>& edge_anchors) {
     if(!Impl::active || factor==1.f)return;
     state_=std::make_unique<State>();auto& s=*state_;s.factor=factor;
+    s.edges=edge_anchors;
     std::unordered_set<uint32_t> seen;
     for(auto group:groups) {
         const auto explicit_pivot=shared_pivots.find(group);

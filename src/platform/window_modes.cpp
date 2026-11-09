@@ -33,7 +33,7 @@ WindowModes::WindowModes(SDL_Window *window,WindowSurfaceMailbox &surface,Window
     :window_(window),id_(0),ui_(0),surface_(surface),api_(api),hooks_(hooks) {
     if(!window || !api.thread || !api.id || !api.flags || !api.position || !api.size ||
        !api.pixels || !api.scale || !api.desktop_mode || !api.fullscreen || !api.restore ||
-       !api.maximize || !api.move || !api.resize || !api.sync || !api.display || !api.modes ||
+       !api.maximize || !api.move || !api.resize || !api.sync || !api.show || !api.display || !api.modes ||
        !api.desktop || !api.current || !api.bounds || !api.selected || !api.free)
         throw std::invalid_argument("Incomplete window mode adapter");
     ui_=api_.thread(); id_=api_.id(window_);
@@ -153,10 +153,11 @@ bool WindowModes::enact(const DisplaySettings &request,const SDL_DisplayMode *mo
         return (api_.flags(window_)&SDL_WINDOW_FULLSCREEN) &&
             (mode ? observed && observed->displayID==mode->displayID && observed->w==mode->w &&
                     observed->h==mode->h && observed->pixel_density==mode->pixel_density &&
-                    current && current->w==mode->w && current->h==mode->h &&
+                    ((api_.flags(window_)&SDL_WINDOW_HIDDEN) ||
+                    (current && current->w==mode->w && current->h==mode->h &&
                     current->pixel_density==mode->pixel_density && current->format==mode->format &&
                     (!mode->refresh_rate || !current->refresh_rate ||
-                     std::abs(current->refresh_rate-mode->refresh_rate)<1.f) : observed==nullptr);
+                     std::abs(current->refresh_rate-mode->refresh_rate)<1.f))) : observed==nullptr);
     }
     if(was_full && (!api_.fullscreen(window_,false) || !api_.sync(window_))) return false;
     if((was_full || restore_pending_) && !restore_placement()) return false;
@@ -259,6 +260,28 @@ WindowModeRoute WindowModes::startup(DisplaySettings request) {
 WindowModeRoute WindowModes::toggle() {
     auto request=settings_; request.fullscreen=!fullscreen_;
     auto result=apply(request); result.consume=true;
+    return result;
+}
+WindowModeRoute WindowModes::reveal() {
+    require_ui();
+    SDL_DisplayMode selected{};
+    const auto *mode=api_.selected(window_);
+    const bool exclusive=mode!=nullptr;
+    if(mode) selected=*mode;
+    if(!api_.show(window_) || !api_.sync(window_) || (api_.flags(window_)&SDL_WINDOW_HIDDEN))
+        throw std::runtime_error("Cannot reveal the prepared game window");
+    // SDL queues fullscreen while hidden. It changes the monitor only on show;
+    // checking the monitor earlier would incorrectly reject saved exclusive modes.
+    WindowModeRoute result;
+    if(!enact(settings_,exclusive ? &selected : nullptr)) {
+        auto fallback=settings_;
+        fallback.fullscreen_resolution={};
+        if(!enact(fallback,nullptr))
+            throw std::runtime_error("Cannot activate the prepared display mode");
+        settings_=fallback;
+        result.error="Saved fullscreen mode is unavailable. Using desktop fullscreen.";
+    }
+    refresh();
     return result;
 }
 WindowModeRoute WindowModes::route(const SDL_Event &event) {

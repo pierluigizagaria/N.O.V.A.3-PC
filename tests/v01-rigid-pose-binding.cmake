@@ -6,7 +6,7 @@ if(NOVA_REAL_TESTS AND (CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "
   target_compile_options(weapon-rigid-pose-binding-tests PRIVATE /W4 /WX /EHsc)
   add_test(NAME weapon-rigid-pose-binding-original
     COMMAND weapon-rigid-pose-binding-tests "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so"
-      "${PROJECT_SOURCE_DIR}/local/work/v01-weapon-position/rigid-pose-binding/resource"
+      "${PROJECT_SOURCE_DIR}/local/fixtures/movement/rigid-pose"
     CONFIGURATIONS Release)
   set_tests_properties(weapon-rigid-pose-binding-original PROPERTIES
     SKIP_RETURN_CODE 77 LABELS "real;opt-in;V01h" TIMEOUT 20)

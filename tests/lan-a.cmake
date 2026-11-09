@@ -3,10 +3,6 @@ option(NOVA_LAN_A_TESTS "Build and register synthetic LAN-A loopback tests" OFF)
 if(NOT NOVA_LAN_A_TESTS)
   return()
 endif()
-set(LAN_A_RUN_ID "" CACHE STRING "Unique integrator-owned LAN-A log run identifier")
-if(NOT LAN_A_RUN_ID MATCHES "^[A-Za-z0-9_-]+$")
-  message(FATAL_ERROR "Set a fresh LAN_A_RUN_ID using letters, digits, underscore or hyphen")
-endif()
 set(LAN_A_FIXTURE "${FIXTURE_DIR}/lan_a.so")
 add_custom_command(OUTPUT "${LAN_A_FIXTURE}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIXTURE_DIR}"
@@ -26,7 +22,7 @@ foreach(case baseline client-bind reply-endpoint omit-reply dirty-address
   add_test(NAME network-lan-a-${case} COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/check_lan_a.py"
     --exe "$<TARGET_FILE:lan-a-tests>" --fixture "${LAN_A_FIXTURE}"
-    --case "${case}" --logs "${PROJECT_SOURCE_DIR}/local/logs/lan-a/runtime-${LAN_A_RUN_ID}/${case}"
+    --case "${case}" --logs "${CMAKE_CURRENT_BINARY_DIR}/runtime/$<CONFIG>/lan-a/${case}"
     CONFIGURATIONS Release)
   set_tests_properties(network-lan-a-${case} PROPERTIES TIMEOUT 30
     RUN_SERIAL TRUE RESOURCE_LOCK lan_udp7891 LABELS "synthetic;opt-in;lan-a"

@@ -70,25 +70,9 @@ uint32_t pe(const unsigned char* p,size_t n) {
     if(at>n-84||u32(p+at)!=0x4550||u16(p+at+4)!=0x14c||u16(p+at+24)!=0x10b) return 0;
     return u32(p+at+24+56);
 }
-struct Gate {const wchar_t* name;uint64_t size;const char* hash;};
 void verify_file(const std::wstring& p,uint64_t size,const std::string& hash) {
     std::ifstream f(std::filesystem::path(p),std::ios::binary);unsigned char header[4096]{};f.read(reinterpret_cast<char*>(header),sizeof header);
     if(std::filesystem::file_size(p)!=size||sha(p)!=hash||!pe(header,size_t(f.gcount()))) throw std::runtime_error("File size/hash/PE32 gate rejected");
-}
-const Gate gates[]={
- {L"nova3pc.exe",1284096,"07237c46f660b0b810496babdf439aa9fadebc1a11c130a3e54451e4c765bcb2"},
- {L"SDL3.dll",1884672,"fad3438578d33c5d0df846701585ad0dcecd1053b09f758ebd39e28a7c9e3304"},
- {L"libEGL.dll",18432,"1bbed13d0a38d0691604d36df353ef30cc7f2452425f291025441d8ad4d9468b"},
- {L"libGLESv2.dll",4976640,"851366723b70679291b30aeb7320c2051ed20b965680ec6dda6ea510d0bdeff6"},
- {L"zlib1.dll",78336,"a0bc7d58e71405e965cafa673439818ade32d41d416a85948f69a79ca4d5a2e8"}};
-std::string gate(const std::wstring& root) {
-    const char* pin="e3f094dfe466b3e5e216a54587ce7bd966f914d480f1ae0f3995dd30dc2c0679";
-    if(sha(root+L"\\local\\logs\\manager-verify-t08ar1\\release-manifest.json")!=pin) throw std::runtime_error("R1 manifest PIN mismatch");
-    std::string out="[";
-    for(auto& g:gates) { auto p=root+L"\\local\\play\\"+g.name;
-        verify_file(p,g.size,g.hash);
-        if(out.size()>1) out+=',';out+="{\"name\":"+jw(g.name)+",\"size\":"+std::to_string(g.size)+",\"sha256\":"+j(g.hash)+",\"machine\":\"0x14c\",\"optional_header\":\"0x10b\"}";
-    }return out+"]";
 }
 struct Config { std::wstring root,exe,prefix;std::vector<std::wstring> args;std::string failure;bool fixture=false; };
 struct Module { uint32_t base=0,size=0,timestamp=0,path_error=0;std::wstring path;HANDLE retry=nullptr;bool system=false,path_truncated=false;BY_HANDLE_FILE_INFORMATION file{};bool file_id=false; };
@@ -355,9 +339,7 @@ int wmain(int argc,wchar_t** argv) {
         auto local=o.c.root+L"\\local\\";
         if(o.c.prefix.empty()||o.c.prefix.size()<=local.size()||_wcsnicmp(o.c.prefix.c_str(),local.c_str(),local.size())) throw std::runtime_error("Output must be under repository local/");
         if(!o.c.fixture) {
-            if(!o.c.failure.empty()||!o.c.args.empty()) throw std::runtime_error("R1 mode accepts no injection or argument overrides");
-            o.verified=gate(o.c.root);o.c.exe=o.c.root+L"\\local\\play\\nova3pc.exe";
-            o.c.args={L"local/input/lib/x86/libNOVA3_neon.so",L"--profile",L"player",L"--profile-root",L"local/profiles/player",L"--backend",L"d3d11",L"--audio",L"sdl"};
+            throw std::runtime_error("Historical R1 game capture is retired; this tool supports owned fixtures only");
         }
         o.run();return o.incomplete?1:0;
     } catch(const std::exception& e) { std::fprintf(stderr,"observer: %s\n",e.what());return 2; }

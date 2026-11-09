@@ -8,7 +8,7 @@ if(NOVA_REAL_TESTS AND (CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "
   add_test(NAME movement-weapon-locomotion-original
     COMMAND movement-weapon-locomotion-tests
       "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so"
-      "${PROJECT_SOURCE_DIR}/local/work/o08-wobble/locomotion-pose/resource"
+      "${PROJECT_SOURCE_DIR}/local/fixtures/movement/locomotion-pose"
     CONFIGURATIONS Release)
   set_tests_properties(movement-weapon-locomotion-original PROPERTIES
     SKIP_RETURN_CODE 77 LABELS "real;opt-in;O08f" TIMEOUT 20)

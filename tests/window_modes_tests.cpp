@@ -89,6 +89,12 @@ bool SDLCALL resize(SDL_Window *window,int w,int h) {
     if(!state->deny_resize) { state->w=w; state->h=h; state->pw=w*2; state->ph=h*2; } return true;
 }
 bool SDLCALL sync(SDL_Window *window) { state->expect(window); return state->effect("sync"); }
+bool SDLCALL show(SDL_Window *window) {
+    state->expect(window);
+    if(!state->effect("show")) return false;
+    state->flags&=~SDL_WINDOW_HIDDEN;
+    return true;
+}
 void prepare(void *user) { check(user==state,"Expected host hook owner"); state->calls.emplace_back("release"); }
 SDL_DisplayID SDLCALL display(SDL_Window *w) { state->expect(w); return state->display; }
 SDL_DisplayMode **SDLCALL modes(SDL_DisplayID d,int *count) {
@@ -103,7 +109,8 @@ SDL_DisplayMode **SDLCALL modes(SDL_DisplayID d,int *count) {
 const SDL_DisplayMode *SDLCALL desktop_mode(SDL_DisplayID) { return &state->desktop; }
 bool SDLCALL bounds(SDL_DisplayID,SDL_Rect *out) { *out={0,0,1920,1080}; return true; }
 const SDL_DisplayMode *SDLCALL current_mode(SDL_DisplayID) {
-    return state->exclusive && !state->wrong_current && (state->flags&SDL_WINDOW_FULLSCREEN) ? &state->selected : &state->desktop;
+    return state->exclusive && !state->wrong_current && !(state->flags&SDL_WINDOW_HIDDEN) &&
+        (state->flags&SDL_WINDOW_FULLSCREEN) ? &state->selected : &state->desktop;
 }
 const SDL_DisplayMode *SDLCALL selected(SDL_Window *w) { state->expect(w); return state->exclusive ? &state->selected : nullptr; }
 void SDLCALL free_modes(void *allocation) {
@@ -115,6 +122,7 @@ void SDLCALL free_modes(void *allocation) {
 }
 WindowModeApi api() {
     WindowModeApi value;
+    value.show=show;
     value.display=display; value.modes=modes; value.desktop=desktop_mode;
     value.current=current_mode; value.selected=selected; value.free=free_modes;
     value.bounds=bounds;
@@ -336,13 +344,40 @@ void disconnected_placement() {
     check(controller.apply(request).changed && fake.x==460 && fake.y==240 && fake.w==1000 && fake.h==600,
           "Disconnected monitor placement recovers inside current display while retaining client size");
 }
+void hidden_startup_reveal() {
+    for(bool fail_mode:{false,true}) {
+        Fake fake; state=&fake; fake.flags|=SDL_WINDOW_HIDDEN;
+        WindowSurfaceMailbox mailbox; WindowModes controller(fake.window,mailbox,api());
+        DisplaySettings request; request.fullscreen=true; request.fullscreen_resolution={1280,720};
+        check(controller.startup(request).error.empty() && controller.settings()==request &&
+              (fake.flags&SDL_WINDOW_HIDDEN) && current_mode(fake.display)->w==1920,
+              "Hidden exclusive startup queues mode without requiring a monitor switch yet");
+        fake.wrong_current=fail_mode;
+        const auto reveal=controller.reveal();
+        check(!(fake.flags&SDL_WINDOW_HIDDEN) && controller.fullscreen(),"Reveal completes the deferred fullscreen transition");
+        if(fail_mode)
+            check(!reveal.error.empty() && controller.settings().fullscreen_resolution==OutputResolution{},
+                  "Denied visible exclusive mode explicitly falls back to desktop fullscreen");
+        else
+            check(reveal.error.empty() && controller.settings()==request && current_mode(fake.display)->w==1280,
+                  "Visible exclusive mode is verified and preserved");
+    }
+    for(const auto *failure:{"show","sync"}) {
+        Fake fake; state=&fake; fake.flags|=SDL_WINDOW_HIDDEN;
+        WindowSurfaceMailbox mailbox; WindowModes controller(fake.window,mailbox,api());
+        fake.fail=failure;
+        bool rejected=false;
+        try { controller.reveal(); } catch(const std::runtime_error &) { rejected=true; }
+        check(rejected,"Show/sync failure cannot acknowledge a successful startup reveal");
+    }
+}
 
 }
 int main() {
     try {
         // Deliberately no SDL_Init/CreateWindow: every reachable video effect is
         // replaced; this executable cannot fullscreen/capture the real desktop.
-        normal_restore(); maximized_restore(); failures_focus_and_minimize(); mailbox_concurrency(); presentation_rectangles(); failed_restore_retry(); display_settings_and_rollback(); startup_window_size_and_denied_restore(); disconnected_placement();
+        normal_restore(); maximized_restore(); failures_focus_and_minimize(); mailbox_concurrency(); presentation_rectangles(); failed_restore_retry(); display_settings_and_rollback(); startup_window_size_and_denied_restore(); disconnected_placement(); hidden_startup_reveal();
         std::puts("PASS platform-window-modes (fake window, zero desktop effects)"); return 0;
     } catch(const std::exception &error) {
         std::fprintf(stderr,"window modes test: %s\n",error.what()); return 1;

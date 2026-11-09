@@ -14,6 +14,7 @@
 #include "input/trace.h"
 #include "input/native_diagnostics.h"
 #include "input/native_intents.h"
+#include "input/grenade_gesture.h"
 #include <map>
 #include <memory>
 #include <set>
@@ -41,7 +42,6 @@ class NativeControls {
     static void __cdecl update(uint32_t player, uint32_t dt);
     static uint32_t __cdecl pressed(uint32_t button);
     static uint32_t __cdecl edge_pressed(uint32_t button);
-    static void __cdecl sweep_draw(uint32_t button,uint32_t alpha);
     static void __cdecl draw(uint32_t interface_);
     static void __cdecl hud_render(uint32_t hud);
     static void __cdecl tutorial_draw(uint32_t tutorial);
@@ -94,6 +94,8 @@ class NativeControls {
     bool bike_event(InputTarget owner,uint32_t type,float x=0,BikeActions *acquire=nullptr);
     void bike_transition(uint32_t component);
     void refresh();
+    void recover_mount_interaction(uint32_t player,bool on_foot);
+    uint32_t interaction_wait_player_=0,interaction_wait_target_=0,interaction_wait_started_=0;
     void apply(uint32_t player);
     void cancel_normal_aim();
     void sync_normal_aim();
@@ -162,7 +164,7 @@ class NativeControls {
     Trace trace_;
     NativeDiagnostics diagnostics_;
     std::map<std::string,uint32_t> functions_;
-    std::unique_ptr<abi::GuestHook> update_, pressed_, draw_, hud_, edge_, sweep_, player_input_, velocity_;
+    std::unique_ptr<abi::GuestHook> update_, pressed_, draw_, hud_, edge_, player_input_, velocity_;
     std::unique_ptr<abi::GuestCall> rush_overlay_;
     std::unique_ptr<abi::GuestHook> mech_input_;
     std::unique_ptr<abi::GuestHook> machinegun_input_, machinegun_update_;
@@ -198,6 +200,9 @@ class NativeControls {
     std::vector<std::unique_ptr<abi::GuestHook>> scheme_draws_;
     std::map<uint32_t,uint32_t> scheme_originals_;
     FrameInput frame_input_;
+    GrenadeGesture grenade_gesture_;
+    bool detonate_pending_=false;
+    uint64_t grenade_epoch_=0,grenade_gamepad_revision_=0;
     NativeAimIntent normal_aim_intent_;
     std::atomic<uint32_t> normal_aim_lane_{0},normal_aim_weapon_{0},normal_aim_manager_{0};
     std::atomic<uint64_t> normal_aim_epoch_{0};

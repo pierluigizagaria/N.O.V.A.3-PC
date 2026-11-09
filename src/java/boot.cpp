@@ -1,6 +1,8 @@
 #include "java/boot.h"
 #include "bionic/runtime.h"
 #include "platform/profile.h"
+#include "net/local_shop.h"
+#include "net/social_invitations.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -103,7 +105,32 @@ void register_boot(jni::Runtime &r, platform::GuestExtent extent,
             bionic::log_once("Push credential request recorded locally; push service disabled");
             return number(0); // Original method returns 0 after scheduling its service task.
         });
-    integer(base + "PushNotification/C2DMAndroidUtils", "HasPushNotification", "()I", 0);
+    r.register_method(base + "PushNotification/C2DMAndroidUtils", "HasPushNotification", "()I",
+        [](auto &, auto, const auto &) { return number(net::social::poll_invitation() ? 1 : 0); });
+    r.register_method(base + "PushNotification/C2DMAndroidUtils", "ResetNotificationStatus", "()V",
+        [](auto &, auto, const auto &) { net::social::reset_notification(); return jni::Value{}; });
+    r.register_method(base + "PushNotification/C2DMAndroidUtils", "GetUserID", "()Ljava/lang/String;",
+        [](auto &vm, auto, const auto &) { jni::Value v; v.l = vm.string(net::social::inviter()); return v; });
+    r.register_method(base + "PushNotification/C2DMAndroidUtils", "GetBundleData", "()Landroid/os/Bundle;",
+        [](auto &vm, auto, const auto &) {
+            auto bundle = std::make_shared<jni::Object>();
+            bundle->klass = vm.klass("android/os/Bundle");
+            bundle->name = net::social::inviter().empty() ? "" : "nova-invitation";
+            jni::Value v; v.l = vm.reference(bundle); return v;
+        });
+    r.register_method("android/os/Bundle", "getInt", "(Ljava/lang/String;)I",
+        [](auto &vm, auto self, const auto &args) {
+            const auto bundle = vm.object(self);
+            return number(bundle && bundle->name == "nova-invitation" &&
+                          vm.text(args[0].l) == "pn_goto_multiplayer" ? 1 : 0);
+        }, false);
+    r.register_method("android/os/Bundle", "containsKey", "(Ljava/lang/String;)Z",
+        [](auto &vm, auto self, const auto &args) {
+            const auto bundle = vm.object(self);
+            const auto key = vm.text(args[0].l);
+            return number(bundle && bundle->name == "nova-invitation" &&
+                          (key == "pn_goto_multiplayer" || key == "pn_launch_game") ? 1 : 0);
+        }, false);
     integer(activity, "IsSupportNeon", "()Z", 0);
     integer(activity, "IsSupportOpenSLES", "()I", 1);
     integer(activity, "IsForceAndroid8", "()Z", 0);
@@ -211,8 +238,17 @@ void register_boot(jni::Runtime &r, platform::GuestExtent extent,
     });
     for (auto [name, sig] :
          {std::pair{"getResource", "(Ljava/lang/String;)[B"},
-          std::pair{"GetFileFromURL", "(Ljava/lang/String;)[B"}, std::pair{"GetKeyboardText", "()[B"}})
+          std::pair{"GetKeyboardText", "()[B"}})
         noop(lib, name, sig);
+    r.register_method(lib, "GetFileFromURL", "(Ljava/lang/String;)[B", [](auto &vm, auto, const auto &a) {
+        jni::Value result;
+        if (a.size() != 1)
+            return result;
+        auto bytes = net::local_shop_file(vm.text(a[0].l));
+        if (bytes)
+            result.l = vm.bytes(bytes->data(), bytes->size());
+        return result;
+    });
     for (auto [name, sig] : {std::pair{"setNoSwapFrames", "(I)V"},
                              std::pair{"setViewSettings", "(IIIII)V"},
                              std::pair{"enableAccelerometer", "(ZF)V"},

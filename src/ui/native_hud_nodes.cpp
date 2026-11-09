@@ -1,5 +1,6 @@
 #include "ui/native_hud_nodes.h"
 #include "ui/native_pixel_projection.h"
+#include "ui/hud_anchor.h"
 #include "abi/guest_hook.h"
 #include "abi/guest_call.h"
 #include "menu/initial_target_scaling.h"
@@ -105,15 +106,20 @@ struct NativeHudNodes::Impl {
     }
     static uint32_t group_for(uint32_t node) {
         for(unsigned depth=0;node && depth<128;++depth) {
+            const auto name=word(node+0xc);
+            if(name && hud_edge(reinterpret_cast<const char*>(name)))return node;
             const auto parent=word(node+0xd0);
             if(!parent)return 0;
             const auto label=word(parent+0xc);
-            if(label && !_stricmp(reinterpret_cast<const char*>(label),"dummy_hud"))return node;
+            if(label && !_stricmp(reinterpret_cast<const char*>(label),"dummy_hud"))return 0;
             node=parent;
         }
         return 0;
     }
     Point anchor(uint32_t hud,uint32_t group) {
+        const auto name=word(group+0xc);
+        if(name)if(const auto edge=hud_edge(reinterpret_cast<const char*>(name)))
+            return {(1+(*edge)[0])*word(width)*.5f,(1-(*edge)[1])*word(height)*.5f};
         const auto camera=word(hud+0x34),table=word(camera);
         const auto p=abi::invoke(word(table+0xf8),{camera});
         const auto v=abi::invoke(word(table+0xfc),{camera});
@@ -178,10 +184,12 @@ struct NativeHudNodes::Impl {
             // Scaling those containers would move the health anchor or put its
             // pivot on the eye plane. Admit the actual visual group instead.
             std::unordered_map<uint32_t,uint32_t> shared_pivots;
+            std::unordered_map<uint32_t,std::array<float,2>> edges;
             uint32_t shield=0;
             for(const auto name:{"shield","weapons","grenade_button","pause_button",
                                  "MP_scores_button","MP_pause_button","hud_jetpack","hud_jeep"}) {
                 const auto node=self.lookup(manager,root_ref,name);held.push_back(node);
+                if(node)edges.emplace(node,*hud_edge(name));
                 if(!std::strcmp(name,"shield"))shield=node;
                 if(node && std::find(nodes.begin(),nodes.end(),node)==nodes.end())nodes.push_back(node);
             }
@@ -216,7 +224,7 @@ struct NativeHudNodes::Impl {
             }
             uint64_t answer;
             {
-                NativePixelProjection::Scope scope(pixel_groups,pixel_factor*factor,shared_pivots);
+                NativePixelProjection::Scope scope(pixel_groups,pixel_factor*factor,shared_pivots,edges);
                 answer=abi::call_guest_u64(self.original,args,2);
             }
             for(const auto node:held) self.drop(node);

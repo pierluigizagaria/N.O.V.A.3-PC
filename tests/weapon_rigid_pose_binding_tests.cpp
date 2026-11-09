@@ -502,7 +502,11 @@ struct RigidBranch {
         check(current_weapon()==f.ptr(f.weapon) && current_root()==p.root.ptr(),"original inventory selects exact supplied owned weapon/root");
     }
     ~RigidBranch(){p.after_publish=nullptr;active=nullptr;}
-    uint32_t current_weapon() const {return run(native.inventory,{f.ptr(f.inventory_manager),1});}
+    uint32_t current_weapon() const {
+        // GetWeaponComponent takes an inventory index, not a current/next flag.
+        // Native GetCurrentWeaponType (0x69a8e0) reads the selected index at +160.
+        return run(native.inventory,{f.ptr(f.inventory_manager),load(f.ptr(f.inventory_manager),0x160)});
+    }
     uint32_t current_root() const {return load(load(current_weapon(),4),0x98);}
     static void __cdecl model_callback(uint32_t receiver,uint32_t type,uint32_t value,uint32_t flags) noexcept { try {
         auto& b=*active;++b.observed_calls;b.observed=matrix(value);

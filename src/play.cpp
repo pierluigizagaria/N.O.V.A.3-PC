@@ -1,3 +1,4 @@
+#include "platform/build_interface.h"
 #include "abi/guest_call.h"
 #include "audio/opensl.h"
 #include "bionic/runtime.h"
@@ -15,6 +16,11 @@
 #include "menu/dialog_escape.h"
 #include "input/play_gamepad.h"
 #include "java/boot.h"
+#include "net/native_trust.h"
+#include "net/native_server_tls.h"
+#include "net/server_config.h"
+#include "net/local_shop.h"
+#include "net/native_session_trace.h"
 #include "jni/runtime.h"
 #include "loader/diagnostics.h"
 #include "menu/native_menu_observer.h"
@@ -34,6 +40,8 @@
 #include "platform/window_modes.h"
 #include "platform/native_render_extent.h"
 #include "platform/render_settings.h"
+#include "platform/startup_presentation.h"
+#include "platform/native_logo.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <atomic>
@@ -55,6 +63,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr auto lib = "com/gameloft/android/ANMP/GloftN3HM/GL2JNILib";
 constexpr auto prefix = "Java_com_gameloft_android_ANMP_GloftN3HM_GL2JNILib_";
+#if defined(NOVA_DEVELOPER_INTERFACE)
 uint32_t positive(const char *text) {
     uint32_t value = 0;
     auto end = text + std::strlen(text);
@@ -63,6 +72,7 @@ uint32_t positive(const char *text) {
         throw std::invalid_argument("Expected a positive frame number");
     return value;
 }
+#endif
 struct Timing {
     std::vector<double> frames, steps;
     uint64_t total = 0;
@@ -117,18 +127,30 @@ bool open_launcher() {
     return false;
 }
 } // namespace
-int main(int argc, char **argv) {
+int game_main(int argc, char **argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
-    if (argc < 2 && open_launcher())
+    if (argc == 2 && std::string_view(argv[1]) == "--help") {
+        std::fputs(nova::build_interface::client_help, stdout);
         return 0;
-    if (argc < 2) {
-        std::fprintf(stderr,
-                     "Usage: nova3pc <library> [--profile name] [--profile-root directory] "
-                     "[--obb-dir directory] [--backend d3d11|vulkan] [--frames N] "
-                     "[--audio sdl|null] [--audio-dump local/output.wav] [--input-script file] "
-                     "[--screenshot-after N] (repeatable) [--input-diagnostics] [--initial-menu-observer] [--diagnostic-menu-ack] [--net-log] [--file-log]\n");
+    }
+    // Reject unsupported public switches before opening a library or profile.
+    if (argc > 1 && std::string_view(argv[1]).starts_with("--")) {
+        std::fputs(nova::build_interface::client_help, stderr);
         return 2;
+    }
+    if (argc < 2 && open_launcher()) return 0;
+    if (argc < 2) { std::fputs(nova::build_interface::client_help, stderr); return 2; }
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view option(argv[i]);
+        if (!nova::build_interface::client_option(option)) {
+            std::fprintf(stderr, "Unsupported option: %s\n", argv[i]);
+            return 2;
+        }
+        if (nova::build_interface::client_requires_value(option) && ++i >= argc) {
+            std::fprintf(stderr, "Missing option value: %s\n", option.data());
+            return 2;
+        }
     }
     try {
         nova::bionic::PathConfig paths;
@@ -139,18 +161,28 @@ int main(int argc, char **argv) {
             std::filesystem::path(executable).parent_path() / "nova3pc.conf", paths.obb);
         std::filesystem::path audio_dump;
         std::filesystem::path input_script;
+        std::filesystem::path local_ca;
+        // Connection selection never owns the independent backend process.
+        // Direct diagnostic invocations can select an explicit file.
+        std::filesystem::path server_config_path = std::filesystem::path(executable).parent_path() / "server.conf";
+        bool explicit_server_config = false;
         bool allow_physical_input = false;
         bool input_diagnostics = false;
         bool menu_observer_enabled = false;
         bool menu_ack_enabled = false;
+        bool session_log = false;
         uint32_t frame_limit = 0;
         std::set<uint32_t> screenshots;
         for (int i = 2; i < argc; ++i) {
             std::string option = argv[i];
+            if (!nova::build_interface::client_option(option))
+                throw std::invalid_argument("Unsupported option: " + option);
+#if defined(NOVA_DEVELOPER_INTERFACE)
             if (option == "--allow-physical-input") { allow_physical_input = true; continue; }
             if (option == "--input-diagnostics") { input_diagnostics = true; continue; }
             if (option == "--diagnostic-menu-ack") { menu_ack_enabled=true; continue; }
             if (option == "--initial-menu-observer") { menu_observer_enabled = true; continue; }
+            if (option == "--session-log") { session_log = true; continue; }
             if (option == "--file-log") {
                 _putenv_s("NOVA_TRACE_FILES", "1");
                 continue;
@@ -159,6 +191,7 @@ int main(int argc, char **argv) {
                 settings.net_log = true;
                 continue;
             }
+#endif
             if (++i >= argc)
                 throw std::invalid_argument("Missing option value: " + option);
             if (option == "--profile")
@@ -171,16 +204,39 @@ int main(int argc, char **argv) {
                 settings.graphics_backend = argv[i];
             else if (option == "--audio")
                 settings.audio = argv[i];
+            else if (option == "--server-config") {
+                server_config_path = std::filesystem::path(std::u8string(argv[i], argv[i] + std::strlen(argv[i])));
+                explicit_server_config = true;
+            }
+#if defined(NOVA_DEVELOPER_INTERFACE)
             else if (option == "--audio-dump")
                 audio_dump = argv[i];
             else if (option == "--input-script")
                 input_script = argv[i];
+            else if (option == "--local-ca")
+                local_ca = argv[i];
             else if (option == "--frames")
                 frame_limit = positive(argv[i]);
             else if (option == "--screenshot-after")
                 screenshots.insert(positive(argv[i]));
+#endif
             else
                 throw std::invalid_argument("Unknown option: " + option);
+        }
+        nova::net::ServerConfig server;
+        try {
+            server = nova::net::read_server_config(server_config_path);
+            if (explicit_server_config && !server.present) throw std::runtime_error("The requested --server-config file does not exist");
+            nova::net::resolve_server_address(server);
+            nova::net::apply_server_hosts(server, settings.hosts);
+            nova::net::configure_server_shop(server);
+            if (server.present) {
+                local_ca.clear();
+                if (!server.profile_root.empty()) paths.profile_root = server.profile_root;
+            }
+        } catch (const std::exception &error) {
+            MessageBoxA(nullptr, error.what(), "N.O.V.A. 3 - server.conf", MB_OK | MB_ICONERROR);
+            throw;
         }
         if(menu_ack_enabled) {
             if(allow_physical_input || !input_script.empty() || !audio_dump.empty() || settings.audio!="null" ||
@@ -230,10 +286,10 @@ int main(int argc, char **argv) {
         nova::ui::NativePixelResources native_pixel_resources(image);
         nova::ui::NativeArtwork native_artwork(image);
         // Provisional T09p capture: bounded menu label paths, reported off-hook.
-        nova::ui::MenuTextTrace::configure(true);
+        nova::ui::MenuTextTrace::configure(nova::build_interface::developer);
         nova::platform::NativeDetail native_detail(image,settings.lod_distance);
         nova::gles::NativeTextureFiltering texture_filtering(image,settings.texture_filtering);
-        nova::report_imports(image);
+        if constexpr (nova::build_interface::developer) nova::report_imports(image);
         const bool overlay_enabled=!scripted_session;
         nova::camera::NativeWorldFov world_fov(image,settings.world_fov,nullptr,nullptr,
                                                settings.weapon_fov,overlay_enabled);
@@ -246,10 +302,16 @@ int main(int argc, char **argv) {
         auto java_extent=std::make_shared<nova::platform::GuestExtentState>(guest_extent);
         nova::platform::RenderSettings render_settings(guest_extent);
         image.run_initializers();
+#if defined(NOVA_DEVELOPER_INTERFACE)
+        nova::net::NativeTrust native_trust(image, local_ca);
+#endif
+        nova::net::NativeServerTls native_server_tls(image, server);
+        nova::net::NativeSessionTrace native_session_trace(image, settings.net_log || session_log);
         const auto controls_path=std::filesystem::path(executable).parent_path()/"controls.conf";
         nova::input::Controls controls(nova::input::ControlsConfig::read(controls_path));
         nova::input::NativeControls native_controls(image, controls, input_diagnostics);
         nova::menu::DialogEscape dialog_escape(image);
+        nova::platform::NativeLogo native_logo(image);
         nova::input::Trace input_trace(input_diagnostics);
         nova::jni::Runtime runtime(image);
         nova::java::register_boot(runtime,guest_extent,java_extent);
@@ -268,7 +330,7 @@ int main(int argc, char **argv) {
         if (!SDL_Init(SDL_INIT_VIDEO))
             throw std::runtime_error(SDL_GetError());
         SDL_Window *window = SDL_CreateWindow("N.O.V.A. 3 PC", 1280, 720,
-                                            SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY);
+                                            SDL_WINDOW_HIDDEN|SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY);
         if (!window)
             throw std::runtime_error(SDL_GetError());
         if(!SDL_SetWindowMinimumSize(window,640,360)) throw std::runtime_error(SDL_GetError());
@@ -344,6 +406,7 @@ int main(int argc, char **argv) {
         std::printf("window visible=%d display_refresh=%.3f Hz; V-Sync plus frame ceiling\n",
                     IsWindowVisible(static_cast<HWND>(hwnd)) ? 1 : 0, refresh);
         std::atomic<nova::platform::Angle *> angle{nullptr};
+        nova::platform::StartupPresentation startup_presentation;
         // The Java class starts at 100: suppress exactly the first swap.
         std::atomic<int> no_swap{100};
         std::atomic<bool> stop{false}, done{false}, end_requested{false}, ready{false};
@@ -553,6 +616,10 @@ int main(int argc, char **argv) {
                                 static_cast<nova::platform::FovPanel *>(user)->gl_draw(width,height);
                             },&panel);
                         } else egl->present();
+                        startup_presentation.presented();
+                        while(startup_presentation.waiting() && !end_requested && !stop)
+                            SDL_Delay(1);
+                        if(startup_presentation.visible()) native_logo.visible();
                         // Some drivers return immediately for an occluded window even with
                         // interval 1. Avoid running the Android frame loop unbounded there.
                         auto remaining = begin + frame_period - Clock::now();
@@ -615,6 +682,13 @@ int main(int argc, char **argv) {
             const auto ack_before=input.diagnostic_touch_receipt();
             unsigned ack_events=0;
             try {
+                if(startup_presentation.needs_reveal() && !end_requested) {
+                    const auto reveal=window_modes.reveal();
+                    if(!reveal.error.empty()) display_error=reveal.error;
+                    focused=SDL_GetKeyboardFocus()==window;
+                    startup_presentation.revealed();
+                    std::printf("startup first frame revealed in configured display mode\n");
+                }
                 synchronize_render_input();
                 if(overlay_enabled) input.suspend_keyboard(panel_owner.visible() || !focused);
                 input.sync_keyboard();
@@ -834,6 +908,7 @@ int main(int argc, char **argv) {
             } catch (const std::exception &error) {
                 input_error = error.what();
                 end_requested = true;
+                startup_presentation.cancel();
                 if(menu_ack_enabled) {
                     ack_failed=true;ack_pair_complete=false;
                     // GL is still parked: retire only our already-owned contact before unpark.

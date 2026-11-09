@@ -5,6 +5,6 @@ if(NOVA_REAL_TESTS)
   target_compile_options(native-device-profile-tests PRIVATE /W4 /WX /EHsc)
   add_test(NAME native-device-profile-real COMMAND native-device-profile-tests
     "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so"
-    "${PROJECT_SOURCE_DIR}/local/work/t11d-fixture/$<CONFIG>")
+    "${CMAKE_CURRENT_BINARY_DIR}/runtime/$<CONFIG>/device-profile")
   set_tests_properties(native-device-profile-real PROPERTIES SKIP_RETURN_CODE 77 LABELS "real;opt-in" TIMEOUT 30)
 endif()

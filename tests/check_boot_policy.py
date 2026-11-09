@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from isolated_runtime import isolated_executable
 
 executable, library, directory = sys.argv[1:]
 if not Path(library).is_file():
@@ -24,7 +25,8 @@ def read(path):
     return values
 
 
-with tempfile.TemporaryDirectory(prefix='policy-', dir=directory) as temp:
+with isolated_executable(executable, directory) as executable, \
+        tempfile.TemporaryDirectory(prefix='policy-', dir=directory) as temp:
     now = int(time.time())
     cases = [('expired', 'LICENSED', str(now - 1), True),
              ('zero', 'LICENSED', '0', True),

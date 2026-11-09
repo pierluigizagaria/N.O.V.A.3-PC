@@ -3,7 +3,9 @@
 #include "ui/native_hud_nodes.h"
 #include "ui/native_menu_fonts.h"
 #include "ui/menu_surfaces.h"
+#include "ui/pause_canvas.h"
 #include "ui/native_pixel_projection.h"
+#include "ui/hud_anchor.h"
 #include "menu/native_menu_observer.h"
 #include "camera/native_world_fov.h"
 #include "abi/guest_hook.h"
@@ -40,11 +42,24 @@ void pixel_math() {
             const auto before=ui::project_vector(projection,point),after=ui::project_vector(*adjusted,point);
             for(unsigned axis=0;axis<2;++axis) {
                 const float a=anchor[axis]/anchor[3];
-                check(std::abs((after[axis]/after[3]-a)*h-(before[axis]/before[3]-a)*1080)<.001f,"projected pixel offsets independent of resolution at all depths");
+                check(std::abs((after[axis]/after[3]-a)*h-(before[axis]/before[3]-a)*720)<.001f,"projected pixel offsets independent of resolution at all depths");
             }
             check(before[2]==after[2] && before[3]==after[3],"depth and perspective division preserved");
         }
-        if(h==1080)check(*adjusted==projection,"reference resolution is exact identity");
+        if(h==720)check(*adjusted==projection,"reference resolution is exact identity");
+        for(const auto name:{"shield","weapons","grenade_button","pause_button","hud_jetpack","hud_jeep","MP_scores_button","MP_pause_button"}) {
+            const auto edge=*ui::hud_edge(name);
+            for(float percent:{.5f,1.f,1.5f,3.f}) {
+                const auto anchored=*ui::pixel_projection_at(projection,edge,factor*percent);
+                for(const ui::PixelVector vertex:std::array<ui::PixelVector,2>{{{4,1,-8,1},{-2,5,-14,1}}}) {
+                    const auto before=ui::project_vector(projection,vertex),after=ui::project_vector(anchored,vertex);
+                    for(unsigned axis=0;axis<2;++axis)
+                        check(std::abs((after[axis]/after[3]-edge[axis])*h-(before[axis]/before[3]-edge[axis])*720*percent)<.002f,
+                              "edge margins and geometry retain reference pixels at every depth and percentage");
+                    check(before[2]==after[2] && before[3]==after[3],"edge transform preserves depth and proportions");
+                }
+            }
+        }
     }
     check(!ui::pixel_projection(projection,view,{0,0,0,1},2),"zero homogeneous pivot rejected");
 }
@@ -117,21 +132,22 @@ void pixel_input_native(const ElfImage& image) {
     std::array<uint32_t,4> entry{addr(group.data()),0,0,0};
     const auto level_slot=image.symbol("_ZN6CLevel10m_instanceE"),wslot=image.symbol("g_ScreenW"),hslot=image.symbol("g_ScreenH");
     const auto previous_level=word(level_slot),previous_w=word(wslot),previous_h=word(hslot);
-    word(level_slot)=addr(level.data());level[0x638/4]=addr(hud.data());word(wslot)=1920;word(hslot)=1080;
+    word(level_slot)=addr(level.data());level[0x638/4]=addr(hud.data());word(wslot)=1280;word(hslot)=720;
     hud[0x34/4]=addr(camera.data());hud[0xd0/4]=addr(entry.data());hud[0xd4/4]=addr(entry.data()+4);
     camera[0]=addr(camera_vtable.data());camera_vtable[0xf8/4]=addr(reinterpret_cast<void*>(&input_p));camera_vtable[0xfc/4]=addr(reinterpret_cast<void*>(&input_v));
     input_projection={.8f,0,0,0,0,1.4f,0,0,0,0,-1,-1,0,0,-2,0};
     input_view={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     auto world=input_view;world[12]=2;world[13]=3;world[14]=-10;
     std::memcpy(group.data()+4,world.data(),sizeof world);group[0xd0/4]=addr(dummy.data());dummy[3]=addr("dummy_hud");
+    group[3]=addr("weapons");
     const auto clip=ui::project_vector(input_projection,{2,3,-10,1});
     const float ax=(1+clip[0]/clip[3])*.5f,ay=(1-clip[1]/clip[3])*.5f;
-    const auto x=static_cast<int16_t>(std::lround(ax*1920)),y=static_cast<int16_t>(std::lround(ay*1080));
+    const auto x=static_cast<int16_t>(std::lround(ax*1280)),y=static_cast<int16_t>(std::lround(ay*720));
     const std::array<int16_t,4> rect{static_cast<int16_t>(x-20),static_cast<int16_t>(y-10),static_cast<int16_t>(x+20),static_cast<int16_t>(y+10)};
     button[0]=addr(button_vtable.data());button_vtable[0x48/4]=image.symbol("_ZN7CButton7SetRectERKN6glitch4core4rectIsEE");
     const std::array<int16_t,4> full{-32768,-32768,32767,32767};std::memcpy(reinterpret_cast<uint8_t*>(button.data())+0x10,full.data(),sizeof full);
     for(bool sweep:{false,true}) {
-    word(wslot)=1920;word(hslot)=1080;
+    word(wslot)=1280;word(hslot)=720;
     if(sweep) {
         button_vtable[0x38/4]=button_vtable[0x3c/4]=addr(reinterpret_cast<void*>(&input_position));
         std::memcpy(reinterpret_cast<uint8_t*>(group.data())+0x13c,rect.data(),sizeof rect);
@@ -142,7 +158,7 @@ void pixel_input_native(const ElfImage& image) {
     for(unsigned h:{720u,1080u,2160u,720u}) {
         word(hslot)=h;word(wslot)=h*16/9;
         for(int offset:{-25,0,19,25}) {
-            const std::array<int16_t,2> point{static_cast<int16_t>(std::lround(ax*word(wslot))+offset),static_cast<int16_t>(std::lround(ay*h))};
+            const std::array<int16_t,2> point{static_cast<int16_t>(word(wslot)+x-1280+offset),y};
             const auto inside=abi::invoke(image.symbol("_ZN15TouchScreenBase13IsTouchInsideERKN6glitch4core8vector2dIsEE"),{addr(button.data()),addr(point.data())});
             check(bool(inside&255)==(offset>=-20 && offset<=20),"original HUD input matches fixed-pixel bounds across resize");
             check(button==saved,"input normalization leaves native bounds unchanged");
@@ -205,11 +221,31 @@ uint64_t __cdecl module(uint32_t s,uint32_t m,uint32_t x,uint32_t y,uint32_t fla
 int percent=100;
 unsigned sprite_kind=0;
 bool nested_crosshair=false,menu_inside_hud=false;
+bool sniper_equipped=false;
+std::array<uint32_t,100> overlay_player{},overlay_manager{};
+std::array<uint32_t,6> overlay_slot{};
+uint32_t __cdecl overlay_component(uint32_t receiver) {
+    check(receiver==123,"sniper query uses the active level");
+    overlay_player[0x170/4]=addr(overlay_manager.data());
+    overlay_manager[0x148/4]=addr(overlay_slot.data());
+    overlay_manager[0x14c/4]=addr(overlay_slot.data()+6);
+    overlay_manager[0x160/4]=0;overlay_slot[3]=456;
+    return addr(overlay_player.data());
+}
+uint32_t __cdecl overlay_sniper(uint32_t receiver) {
+    check(receiver==456,"sniper predicate uses the selected weapon component");
+    return sniper_equipped;
+}
 uint64_t __cdecl hud(uint32_t receiver) {
     check(receiver==123 && width*9==height*16 && target[7]==width && target[8]==height && clip==std::array<uint32_t,4>{1,2,3,4},
           "HUD and persistent resources see the actual dimensions and original clip");
     driver[0xec/4]=1; matrix(); expected=gpu;
-    if(!ui::menu_draw_depth) ui::scale_projection(expected,nested_radar ? ui::fitted_anchor(width,height,{39,87}) : nested_crosshair ? ui::Point{width*.5f,height*.5f} : ui::Point{640,360},ui::hud_factor(percent));
+    if(!ui::menu_draw_depth && !nested_font && !(nested_crosshair && sniper_equipped)) ui::scale_projection(expected,nested_radar ? ui::fitted_anchor(width,height,{39,87}) : nested_crosshair ? ui::Point{width*.5f,height*.5f} : ui::Point{640,360},ui::hud_factor(percent));
+    if(!ui::menu_draw_depth && nested_radar) {
+        const auto old=ui::fitted_anchor(width,height,{39,87}),reference=ui::fitted_anchor(1280,720,{39,87});
+        expected[12]+=gpu[0]*(reference.x*ui::hud_factor(percent)-old.x);
+        expected[13]+=gpu[5]*(reference.y*ui::hud_factor(percent)-old.y);
+    }
     uint64_t answer;
     if(menu_inside_hud) {
         expected=gpu;
@@ -355,11 +391,108 @@ void health_layers_native(const ElfImage& image) {
     uint32_t root=addr(nodes[0].data());
     for(unsigned h:{720u,1080u,2160u,720u})for(int p:{50,100,150}) {
         height=h;requested.set(p);
-        expected=*ui::pixel_projection(health_projection,health_view,{2,3,-10,1},ui::resolution_pixel_factor(h)*ui::hud_factor(p));
+        expected=*ui::pixel_projection_at(health_projection,{0,1},ui::resolution_pixel_factor(h)*ui::hud_factor(p));
         check(ui::NativeHudNodes::fixture_draw(addr(node_manager.data()),addr(&root))==result,"complete health-group draw preserves native return");
         check(nodes==saved && gpu==health_projection,"health-group draw restores driver state and leaves authored matrices unchanged");
     }
     vtable[0x58/4]=addr(reinterpret_cast<void*>(&setter));
+}
+std::array<uint32_t,180> live_pause{};
+std::array<uint32_t,10> live_touch{};
+uint32_t live_state=0,live_root=0,pause_projection=0;
+ui::PauseExtent live_logical{},live_physical{};
+bool live_registered=false;
+bool live_confirmation=false;
+unsigned live_creates=0,live_releases=0,live_events=0;
+std::array<int16_t,2> live_expected{};
+uint64_t __cdecl live_app() {return 0x10000;}
+uint64_t __cdecl live_current(uint32_t stack_address) {
+    check(stack_address==0x28738,"pause queries the original state stack");return live_state;
+}
+void live_metrics() {
+    const auto extent=live_registered ? live_logical : live_physical;
+    check(width==extent.width && height==extent.height && target[7]==width && target[8]==height,
+          "retained menu metrics and clipping use one coherent canvas");
+    check(target[3]==live_physical.width && target[4]==live_physical.height,
+          "render allocation stays at physical resolution");
+}
+uint64_t __cdecl live_create(uint32_t receiver) {
+    check(receiver==addr(live_pause.data()),"pause create receiver");
+    if(!live_confirmation)check(word(receiver,0x224)==width && word(receiver,0x228)==height,"constructor dimensions refreshed before Create");
+    check(width==1280 && height==720 && target[7]==width && target[8]==height,"pause and confirmation are constructed in the same canvas");
+    ++live_creates;return result;
+}
+uint64_t __cdecl live_release(uint32_t) {++live_releases;return result;}
+uint64_t __cdecl live_update(uint32_t) {live_metrics();return result;}
+uint64_t __cdecl live_render(uint32_t) {
+    check(width==live_physical.width && height==live_physical.height,"parent world render keeps real dimensions");
+    check(ui::NativeScale::fixture_draw_begin()==0x10000,"checked post-parent boundary forwards app return");
+    live_metrics();
+    if(pause_projection) {
+        abi::invoke(pause_projection,{addr(driver.data())});
+        check(close_enough(gpu[0],2.f/width) && close_enough(gpu[5],-2.f/height),
+              "native projection maps retained menu into the physical viewport");
+    }
+    // A right-edge resume button and its clip must land together, including
+    // across repeated resize/rollback without accumulating integer rounding.
+    const auto canvas=live_registered ? live_logical : live_physical;
+    const float right=(canvas.width-20.f)/canvas.width*live_physical.width;
+    check(right<live_physical.width && right>live_physical.width*.95f,"right button and clip fit current display");
+    return result;
+}
+uint64_t __cdecl live_event(uint32_t root,uint32_t point,uint32_t id) {
+    check(root==live_root && id==17,"touch identity and event arguments retained");
+    std::array<int16_t,2> actual;std::memcpy(actual.data(),reinterpret_cast<void*>(point),sizeof actual);
+    check(actual==live_expected,"all pointer phases map to the same retained button coordinates");
+    live_metrics();++live_events;
+    return result;
+}
+void pause_lifetime() {
+    setup();ui::RequestedScale requested;
+    live_pause={};live_touch={};live_creates=live_releases=live_events=0;
+    live_state=addr(live_pause.data());live_root=addr(live_touch.data());
+    ui::NativeScale scale(requested,{addr(reinterpret_cast<void*>(&viewport)),addr(reinterpret_cast<void*>(&projection)),
+        addr(reinterpret_cast<void*>(&render)),addr(reinterpret_cast<void*>(&hit)),
+        addr(reinterpret_cast<void*>(&live_render)),addr(reinterpret_cast<void*>(&death))});
+    scale.fixture_pause_bindings({addr(reinterpret_cast<void*>(&live_create)),addr(reinterpret_cast<void*>(&live_update)),
+        addr(reinterpret_cast<void*>(&live_release)),addr(reinterpret_cast<void*>(&live_app)),addr(reinterpret_cast<void*>(&live_current)),
+        addr(&device_global),addr(&width),addr(&height),addr(&live_root),
+        {addr(reinterpret_cast<void*>(&live_event)),addr(reinterpret_cast<void*>(&live_event)),addr(reinterpret_cast<void*>(&live_event)),addr(reinterpret_cast<void*>(&live_event))},
+        {addr(reinterpret_cast<void*>(&live_create)),addr(reinterpret_cast<void*>(&live_update)),addr(reinterpret_cast<void*>(&live_release)),addr(reinterpret_cast<void*>(&live_render))}});
+    for(bool confirmation:{false,true})for(auto construction:std::array<ui::PauseExtent,3>{{{1920,1080},{1280,720},{3840,2160}}}) {
+        live_confirmation=confirmation;
+        live_logical={1280,720};live_physical=construction;
+        width=construction.width;height=construction.height;target[3]=target[7]=width;target[4]=target[8]=height;
+        live_pause[0x224/4]=999;live_pause[0x228/4]=999;
+        check(ui::NativeScale::fixture_create(live_state,confirmation)==result,"Create preserves both return registers");
+        live_registered=true;
+        live_pause[0x1b0/4]=4;live_pause[0x264/4]=13; // page and persistent UI state
+        const auto retained=live_pause;
+        for(auto physical:std::array<ui::PauseExtent,7>{{{1920,1080},{1280,720},{960,540},{3840,2160},{640,360},{1280,720},{1920,1080}}}) {
+            live_physical=physical;width=physical.width;height=physical.height;
+            target[3]=target[7]=width;target[4]=target[8]=height;
+            const std::array<int16_t,4> root_rect{0,0,static_cast<int16_t>(width),static_cast<int16_t>(height)};
+            std::memcpy(live_touch.data()+2,root_rect.data(),sizeof root_rect);
+            const auto target_before=target;const auto touch_before=live_touch;
+            check(ui::NativeScale::fixture_pause(live_state,confirmation)==result,"live Render preserves return registers");
+            check(ui::NativeScale::fixture_update(live_state,confirmation)==result,"live Update preserves return registers");
+            for(unsigned phase=0;phase<4;++phase) {
+                const std::array<int16_t,2> point{static_cast<int16_t>(width*3/4),static_cast<int16_t>(height/2)};
+                live_expected={960,360};
+                check(ui::NativeScale::fixture_touch(phase,live_root,addr(point.data()),17)==result,"touch callback preserves return registers");
+                check(point[0]==width*3/4 && point[1]==height/2,"input point remains owned by caller");
+            }
+            check(live_pause==retained,"resize keeps page, controls and scroll state without rebuilding");
+            check(target==target_before && live_touch==touch_before && width==physical.width && height==physical.height,
+                  "all logical display and root touch bounds restored after each callback");
+        }
+        check(ui::NativeScale::fixture_release(live_state,confirmation)==result,"Release forwards native lifecycle once");
+        live_registered=false;
+        ui::NativeScale::fixture_pause(live_state,confirmation);
+        const std::array<int16_t,2> point{100,100};live_expected=point;
+        ui::NativeScale::fixture_touch(0,live_root,addr(point.data()),17);
+    }
+    check(live_creates==6 && live_releases==6 && live_events==174,"pause and confirmation share resize/input/lifecycle policy without recreating controls");
 }
 void synthetic() {
     setup(); ui::RequestedScale requested;
@@ -385,11 +518,12 @@ void synthetic() {
         ui::MenuSurfaces::retire(1,1);
     }
     {
-        ui::NativeHudScale scale(requested,{{addr(reinterpret_cast<void*>(&hud)),addr(reinterpret_cast<void*>(&frame)),0,addr(reinterpret_cast<void*>(&font)),0,addr(reinterpret_cast<void*>(&radar)),addr(reinterpret_cast<void*>(&aframe)),addr(reinterpret_cast<void*>(&fmodule)),addr(reinterpret_cast<void*>(&module)),addr(reinterpret_cast<void*>(&crosshair))},addr(&device_global),addr(&width),addr(&height),addr(clip.data())});
+        ui::NativeHudScale scale(requested,{{addr(reinterpret_cast<void*>(&hud)),addr(reinterpret_cast<void*>(&frame)),0,addr(reinterpret_cast<void*>(&font)),0,addr(reinterpret_cast<void*>(&radar)),addr(reinterpret_cast<void*>(&aframe)),addr(reinterpret_cast<void*>(&fmodule)),addr(reinterpret_cast<void*>(&module)),addr(reinterpret_cast<void*>(&crosshair))},addr(&device_global),addr(&width),addr(&height),addr(clip.data()),addr(reinterpret_cast<void*>(&overlay_component)),addr(reinterpret_cast<void*>(&overlay_sniper))});
         for(unsigned w:{640u,1280u,1920u,3840u,1280u,1920u,640u}) for(int p:{50,100,150,300}) {
             width=w; height=w*9/16; target[7]=width; target[8]=height; percent=p; requested.set(p);
-            for(unsigned kind=0;kind<7;++kind) {
-                nested_font=kind==1; nested_radar=kind==2; sprite_kind=kind>=3 && kind<6 ? kind+3 : 0; nested_crosshair=kind==6;
+            for(unsigned kind=0;kind<8;++kind) {
+                sniper_equipped=kind==7;
+                nested_font=kind==1; nested_radar=kind==2; sprite_kind=kind>=3 && kind<6 ? kind+3 : 0; nested_crosshair=kind>=6;
                 check(ui::NativeHudScale::fixture_hud(123)==result,"HUD return registers preserved");
                 check(clip==std::array<uint32_t,4>{1,2,3,4} && width==w && height==w*9/16 && target[7]==width && target[8]==height,"HUD never changes real display metrics or clip");
             }
@@ -402,7 +536,7 @@ void synthetic() {
             { ui::MenuDrawScope menu; ui::NativeHudScale::fixture_hud(123); }
             check(!ui::menu_draw_depth,"HUD and menu scopes restore after interleaving");
         }
-        // At100% do not even query host-side HUD target/resource state.
+        // A missing device during startup retains the original draw.
         requested.set(100); percent=100; nested_font=nested_radar=nested_crosshair=false; sprite_kind=0;
         const auto old_device=device_global; device_global=0; const auto old_flushes=flushes;
         ui::NativeHudScale::fixture_hud(123);
@@ -495,6 +629,8 @@ void real(const char* path) {
     std::memcpy(hit_prefix.data(),reinterpret_cast<void*>(image.address(0x547fc0)),hit_prefix.size());
     {
         platform::Angle angle("d3d11"); angle.create(nullptr,2048,2048,0);
+        pause_projection=abi::require_function(image,"_ZN6glitch5video19CCommonGLDriverBase15set2DProjectionEv");
+        pause_lifetime();pause_projection=0;
         health_layers_native(image);
         menu::NativeMenuObserver observer(image,false,true); ui::RequestedScale requested;
         ui::NativeScale scale(image,requested); ui::NativeHudScale hud_scale(image,requested); ui::NativeHudNodes hud_nodes(image,requested);
@@ -565,10 +701,39 @@ void real(const char* path) {
     for(const auto& item:saved) check(!std::memcmp(reinterpret_cast<void*>(item.first),item.second.data(),item.second.size()),"every original executable byte restored after coexistence");
 }
 }
+unsigned checkpoint_calls=0;
+void __cdecl checkpoint_callback() {
+    ++checkpoint_calls;
+    __asm {
+        xor ecx,ecx
+        xor edx,edx
+        xorps xmm0,xmm0
+        fldz
+        clc
+    }
+}
+void checkpoint_test(const char* path) {
+    ImportRegistry imports;ElfImage image(path,imports);
+    const auto fn=image.symbol("checkpoint_probe");
+    std::array<uint32_t,66> data{};data[64]=0xabcdef01;data[65]=std::bit_cast<uint32_t>(3.5f);
+    check(abi::invoke(fn,{addr(data.data())})==data[64],"checkpoint baseline return");
+    const auto expected=data;
+    for(unsigned pass=0;pass<3;++pass) {
+        data.fill(0);data[64]=expected[64];data[65]=expected[65];
+        {
+            abi::GuestCheckpoint checkpoint(image,"checkpoint_probe",64,{0x8b,0x83,0,1,0,0},addr(reinterpret_cast<void*>(&checkpoint_callback)));
+            check(abi::invoke(fn,{addr(data.data())})==expected[64] && data==expected,
+                  "checkpoint preserves flags, GPRs, x87 stack and SSE while replaying the native instruction");
+        }
+        check(abi::invoke(fn,{addr(data.data())})==expected[64] && data==expected,"checkpoint restores original executable bytes");
+    }
+    check(checkpoint_calls==3,"checkpoint executes callback exactly once");
+}
 int main(int argc,char** argv) {
     try {
-        if(argc==2) { if(!std::filesystem::exists(argv[1])) return 77; real(argv[1]); }
-        else { pixel_math(); synthetic(); nodes_synthetic(); image_pattern(); }
+        if(argc==3 && std::string(argv[2])=="--checkpoint")checkpoint_test(argv[1]);
+        else if(argc==2) { if(!std::filesystem::exists(argv[1])) return 77; real(argv[1]); }
+        else { pixel_math(); synthetic(); pause_lifetime(); nodes_synthetic(); image_pattern(); }
         std::puts("UI scale checks passed; no game initializers or gameplay executed"); return 0;
     } catch(const std::exception& e) { std::fprintf(stderr,"UI scale FAIL %s\n",e.what()); return 1; }
 }

@@ -1,5 +1,4 @@
 #include "launcher/skin.h"
-#include "launcher/pc_mark.h"
 #include <objidl.h>
 #include <gdiplus.h>
 #include <bcrypt.h>
@@ -8,6 +7,7 @@
 #include <cwctype>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -31,83 +31,6 @@ std::unique_ptr<Bitmap> bitmap(const std::filesystem::path &path) {
     return image;
 }
 std::wstring upper(std::wstring value) {for(auto &c:value)c=static_cast<wchar_t>(towupper(c));return value;}
-// Separable box blur of a W x H float image (three passes approximate a Gaussian).
-void box_blur(std::vector<float> &v,int w,int h,int radius) {
-    std::vector<float> t(v.size());
-    for(int pass=0;pass<3;++pass) {
-        for(int y=0;y<h;++y) for(int x=0;x<w;++x) {
-            float sum=0; int n=0;
-            for(int k=-radius;k<=radius;++k) if(x+k>=0&&x+k<w) {sum+=v[y*w+x+k];++n;}
-            t[y*w+x]=sum/n;
-        }
-        for(int y=0;y<h;++y) for(int x=0;x<w;++x) {
-            float sum=0; int n=0;
-            for(int k=-radius;k<=radius;++k) if(y+k>=0&&y+k<h) {sum+=t[(y+k)*w+x];++n;}
-            v[y*w+x]=sum/n;
-        }
-    }
-}
-// Owner-drawn "PC" mark (pc_mark.h), smoothed into straight 45-degree edges and
-// finished like the logo lettering, flat: gradient face and dark teal rim. One cell of padding holds the rim.
-constexpr int mark_cell=8;
-std::unique_ptr<Bitmap> make_pc_mark(int &ink_height) {
-    std::vector<std::string> rows; std::string row;
-    for(const char *c=pc_mark;;++c) {
-        if(*c=='\n'||!*c) {if(!row.empty())rows.push_back(row);row.clear();if(!*c)break;}
-        else row+=*c;
-    }
-    if(rows.empty())return {};
-    const int cols=static_cast<int>(rows[0].size()),lines=static_cast<int>(rows.size());
-    const int w=(cols+2)*mark_cell,h=(lines+2)*mark_cell;
-    std::vector<float> ink(static_cast<size_t>(w)*h,0.f);
-    for(int y=0;y<h;++y) for(int x=0;x<w;++x) {
-        const int cx=x/mark_cell-1,cy=y/mark_cell-1;
-        if(cx>=0&&cy>=0&&cx<cols&&cy<lines&&cx<static_cast<int>(rows[cy].size())&&rows[cy][cx]=='#')ink[y*w+x]=1.f;
-    }
-    box_blur(ink,w,h,mark_cell/2);
-    auto bitmap=std::make_unique<Bitmap>(w,h,PixelFormat32bppARGB);
-    BitmapData data{}; Gdiplus::Rect all(0,0,w,h);
-    if(bitmap->LockBits(&all,ImageLockModeWrite,PixelFormat32bppARGB,&data)!=Ok)return {};
-    for(int y=0;y<h;++y) {
-        auto *out=reinterpret_cast<UINT32 *>(static_cast<BYTE *>(data.Scan0)+y*data.Stride);
-        for(int x=0;x<w;++x) {
-            const float v=ink[y*w+x];
-            // Steep ramps around the 0.5 contour keep edges crisp; a lower contour forms the rim.
-            const float face=std::clamp((v-.5f)*6.f+.5f,0.f,1.f),rim=std::clamp((v-.1f)*8.f+.5f,0.f,1.f);
-            // Logo finish: white-to-pale-blue face over a dark teal rim (same values as make_banner.py).
-            const float t=std::clamp(float(y-mark_cell)/float(lines*mark_cell),0.f,1.f);
-            const float fr=250+(184-250)*t,fg=253+(228-253)*t,fb=253+(236-253)*t;
-            const float r=10+(fr-10)*face,g=38+(fg-38)*face,b=46+(fb-46)*face;
-            const auto a=static_cast<UINT32>(rim*255.f+.5f);
-            out[x]=(a<<24)|(static_cast<UINT32>(r*rim+.5f)<<16)|(static_cast<UINT32>(g*rim+.5f)<<8)|static_cast<UINT32>(b*rim+.5f);
-        }
-    }
-    bitmap->UnlockBits(&data);
-    ink_height=lines*mark_cell;
-    return bitmap;
-}
-// Rows of the N.O.V.A lettering in the logo, as fractions of its height: the
-// longest run of well-covered rows in the left half (the "3" and brackets excluded).
-std::pair<float,float> letter_band(Bitmap &logo) {
-    const int w=static_cast<int>(logo.GetWidth())/2,h=static_cast<int>(logo.GetHeight());
-    std::pair<float,float> fallback{.25f,.70f};
-    if(w<=0||h<=0)return fallback;
-    BitmapData data{}; Gdiplus::Rect half(0,0,w,h);
-    if(logo.LockBits(&half,ImageLockModeRead,PixelFormat32bppARGB,&data)!=Ok)return fallback;
-    int best_start=0,best_length=0,start=-1;
-    for(int y=0;y<=h;++y) {
-        int covered=0;
-        if(y<h) {
-            const auto *in=reinterpret_cast<const UINT32 *>(static_cast<const BYTE *>(data.Scan0)+y*data.Stride);
-            for(int x=0;x<w;++x) covered+=(in[x]>>24)>128;
-        }
-        if(y<h && covered>w*3/10) {if(start<0)start=y;}
-        else if(start>=0) {if(y-start>best_length){best_length=y-start;best_start=start;}start=-1;}
-    }
-    logo.UnlockBits(&data);
-    if(!best_length)return fallback;
-    return {float(best_start)/h,float(best_start+best_length)/h};
-}
 // The original artwork carries the identity; the interface sits directly on it
 // with a single cyan accent and a warm error tone.
 const Color fallback_base(255,10,13,16),    card(110,4,6,8),card_edge(52,255,255,255),dim(255,150,160,166),faint(255,104,114,120),
@@ -139,20 +62,32 @@ struct Skin::Impl {
     std::vector<unsigned char> font_bytes;
     std::unique_ptr<PrivateFontCollection> collection;
     std::unique_ptr<FontFamily> family,body_family,strong_family;
-    std::unique_ptr<Bitmap> background,logo,app_icon,mark;
-    int mark_ink=0; std::pair<float,float> band{.25f,.70f};
+    std::unique_ptr<Bitmap> background,logo,app_icon;
+    HDC frame_dc=nullptr;
+    HBITMAP frame_bitmap=nullptr;
+    HGDIOBJ frame_previous=nullptr;
+    int frame_width=0,frame_height=0;
+    std::optional<SkinState> frame_state;
     HICON window_icon=nullptr;
     bool authentic=false;
     std::wstring family_name=L"Segoe UI";
     std::string font_hash;
     Impl(){GdiplusStartupInput input;if(GdiplusStartup(&token,&input,nullptr)!=Ok)throw std::runtime_error("Cannot initialize launcher graphics.");}
-    ~Impl(){if(window_icon)DestroyIcon(window_icon);background.reset();mark.reset();logo.reset();app_icon.reset();family.reset();body_family.reset();strong_family.reset();collection.reset();GdiplusShutdown(token);}
+    void clear_frame() {
+        if(frame_dc) {
+            SelectObject(frame_dc,frame_previous);
+            DeleteObject(frame_bitmap);DeleteDC(frame_dc);
+        }
+        frame_dc=nullptr;frame_bitmap=nullptr;frame_previous=nullptr;frame_state.reset();
+    }
+    ~Impl(){clear_frame();if(window_icon)DestroyIcon(window_icon);background.reset();logo.reset();app_icon.reset();family.reset();body_family.reset();strong_family.reset();collection.reset();GdiplusShutdown(token);}
     enum class Face {display,body,strong};
     struct Style {
         Face face=Face::body; REAL size=14; Color color=text_main;
         StringAlignment align=StringAlignmentNear; bool wrap=false,path=false;
     };
     const FontFamily *family_for(Face face) const {
+        if(authentic && face!=Face::body)return family.get();
         return face==Face::display?family.get():face==Face::strong?strong_family.get():body_family.get();
     }
     void text(Graphics &g,const std::wstring &s,RectF r,const Style &style) const {
@@ -303,6 +238,22 @@ struct Skin::Impl {
         Style message; message.size=13; message.wrap=true; message.color=Color(255,246,222,216);
         text(g,s.log.empty()?std::wstring():s.log.back(),RectF(content_x+20,334,content_w-40,54),message);
     }
+    HDC frame(HDC target,int width,int height,const SkinState &state) {
+        if(frame_dc && (width!=frame_width || height!=frame_height))clear_frame();
+        if(!frame_dc) {
+            frame_dc=CreateCompatibleDC(target);
+            frame_bitmap=CreateCompatibleBitmap(target,width,height);
+            frame_previous=SelectObject(frame_dc,frame_bitmap);
+            frame_width=width;frame_height=height;
+        }
+        if(!frame_state || *frame_state!=state) {
+            Graphics graphics(frame_dc);
+            graphics.ScaleTransform(REAL(width)/canvas_width,REAL(height)/canvas_height);
+            scene(graphics,state);
+            frame_state=state;
+        }
+        return frame_dc;
+    }
     void scene(Graphics &g,const SkinState &s) const {
         g.SetSmoothingMode(SmoothingModeAntiAlias);g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
         g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
@@ -318,17 +269,10 @@ struct Skin::Impl {
             g.FillRectangle(&floor,0.f,380.f,REAL(canvas_width),REAL(canvas_height-380));
         } else {SolidBrush base(fallback_base); g.FillRectangle(&base,0,0,canvas_width,canvas_height);}
         if(logo) {
-            // Preserve the original logo's proportions inside a 260x90 box, leaving room for "PC".
+            // Draw the approved composite as one image, preserving its spacing and geometry.
             const REAL w=REAL(logo->GetWidth()),h=REAL(logo->GetHeight());
-            const REAL scale=std::min(260.f/w,90.f/h);
-            const RectF placed(content_x-6,40,w*scale,h*scale);
-            g.DrawImage(logo.get(),placed);
-            if(mark && mark_ink) {
-                // "PC" at the N.O.V.A cap height, on the same baseline, just right of the logo.
-                const REAL cap=(band.second-band.first)*placed.Height,k=cap/mark_ink,pad=mark_cell*k;
-                g.DrawImage(mark.get(),RectF(placed.GetRight()+cap*.12f-pad,placed.Y+band.first*placed.Height-pad,
-                    REAL(mark->GetWidth())*k,REAL(mark->GetHeight())*k));
-            }
+            const REAL scale=std::min(content_w/w,90.f/h);
+            g.DrawImage(logo.get(),RectF(content_x-6,40,w*scale,h*scale));
         } else {
             Style style; style.face=Face::display; style.size=32;
             text(g,L"N.O.V.A. 3",RectF(content_x,66,content_w,48),style);
@@ -356,6 +300,7 @@ struct Skin::Impl {
 Skin::Skin():impl_(std::make_unique<Impl>()){}
 Skin::~Skin()=default;
 void Skin::load(const std::filesystem::path &root) {
+    impl_->frame_state.reset();
     auto &p=*impl_;
     // Prefer the Windows UI face; fall back to the generic sans family instead of failing.
     auto system_family=[](std::initializer_list<const wchar_t *> names) {
@@ -387,11 +332,7 @@ void Skin::load(const std::filesystem::path &root) {
     }
     if(!p.family)p.family=std::unique_ptr<FontFamily>(p.body_family->Clone());
     if(!p.background)p.background=bitmap(root/"local/launcher/background-a.png");
-    if(!p.logo) {
-        p.logo=bitmap(root/"local/launcher/logo-original.png");
-        if(p.logo)p.band=letter_band(*p.logo);
-    }
-    if(!p.mark)p.mark=make_pc_mark(p.mark_ink);
+    if(!p.logo)p.logo=bitmap(root/"local/launcher/logo-pc.png");
     if(!p.app_icon) {p.app_icon=bitmap(root/"local/launcher/icon.png");if(p.app_icon)p.app_icon->GetHICON(&p.window_icon);}
 }
 bool Skin::original_font()const{return impl_->authentic;}
@@ -399,8 +340,16 @@ bool Skin::complete()const{return original_font() && impl_->background && impl_-
 HICON Skin::icon()const{return impl_->window_icon;}
 void Skin::draw(HDC dc,int width,int height,const SkinState &state,int ox,int oy) {
     if(width<=0||height<=0)return;
-    Graphics graphics(dc);graphics.TranslateTransform(REAL(-ox),REAL(-oy));graphics.ScaleTransform(REAL(width)/canvas_width,REAL(height)/canvas_height);
-    impl_->scene(graphics,state);
+    BitBlt(dc,0,0,width,height,impl_->frame(dc,width,height,state),ox,oy,SRCCOPY);
+}
+void Skin::draw_control(HDC dc,int width,int height,const SkinState &state,POINT origin,const RECT &bounds) {
+    if(width<=0 || height<=0 || bounds.right<=bounds.left || bounds.bottom<=bounds.top)return;
+    // An owner-draw DC is not guaranteed to clip the full scene to the button.
+    // Compose in parent pixel coordinates, then copy only rcItem. This also keeps
+    // scaled artwork/text identical to the parent paint, without translating it
+    // through a child-sized GDI+ device context on hover/focus/press updates.
+    BitBlt(dc,bounds.left,bounds.top,bounds.right-bounds.left,bounds.bottom-bounds.top,
+        impl_->frame(dc,width,height,state),origin.x+bounds.left,origin.y+bounds.top,SRCCOPY);
 }
 void Skin::preview(const std::filesystem::path &path,const SkinState &state,int width,int height) {
     Bitmap output(width,height,PixelFormat32bppARGB);

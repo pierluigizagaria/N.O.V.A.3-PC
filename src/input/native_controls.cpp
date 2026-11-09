@@ -2,7 +2,10 @@
 #include "input/native_draw.h"
 #include "input/native_ads.h"
 #include "input/normal_keyboard_movement.h"
+#include "input/native_power_selection.h"
 #include "camera/native_world_fov.h"
+#include "camera/native_death_camera.h"
+#include "net/native_snapshot_presentation.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -69,12 +72,16 @@ NativeControls::NativeControls(const ElfImage &image, Controls &input, bool deta
         "_ZN14CPlayerControl7onEventEPK6IEventPK12EventManager", "_ZN16CWeaponComponent8FireStopEib",
         "_ZN14CPlayerControl13ResetControlsEv",
         "_Z25HudPressedNoSweepCallbackP15CButtonHudSweep",
+        "_Z22PressedNoSweepCallbackP12CButtonSweep",
+        "_Z16HudSweepCallbackP15CButtonHudSweepi", "_Z13SweepCallbackP12CButtonSweepi",
+        "_ZN15CButtonHudSweep19SetCurrentSelectionEi", "_ZN12CButtonSweep19SetCurrentSelectionEi",
         "_ZN12EventManager9raiseSyncERK6IEvent", "_ZN13CPowerManager21GetNormalPowerCrtAmmoEi",
         "_ZN13CPowerManager11CanUsePowerEb", "_ZN13CPowerManager18GetPowerTypeOnSlotEi",
         "_ZN11Application11GetInstanceEv", "_ZN12gxStateStack12CurrentStateEv",
         "_ZNK11CGameObject6IsDeadEv", "_ZN15PlayerComponent19IsWatchingCinematicEv",
         "_ZN11CGameObject9RotateYawEf", "_ZN11CGameObject11RotatePitchEf",
         "_ZN15PlayerComponent13UseMeleePowerEv", "_ZN15PlayerComponent8InteractEv",
+        "_ZN15PlayerComponent10UnInteractEv",
         "_ZN14CWeaponManager5UnAimEv",
         "_ZN16CWeaponComponent5UnAimEb",
         "_ZN16CWeaponComponent21GetMainAnimationStateEv",
@@ -85,6 +92,10 @@ NativeControls::NativeControls(const ElfImage &image, Controls &input, bool deta
         "lua_toboolean", "lua_close", "_Z17Menu_SetAimAssistP9lua_State",
         "_Z17Menu_GetAimAssistP9lua_State"}) functions_[name] = abi::require_function(image,name);
     normal_update_entry_=abi::require_function(image,"_ZN21CLevelInterfaceNormal6UpdateEi");
+    constexpr std::array<uint8_t,11> detonator_query{0x8b,0x47,0x68,0x8b,0x10,0x89,0x04,0x24,0xff,0x52,0x30};
+    if(!std::equal(detonator_query.begin(),detonator_query.end(),
+                  reinterpret_cast<const uint8_t *>(normal_update_entry_+0x5ee)))
+        throw std::runtime_error("Native detonator query layout mismatch");
     normal_switch_call_=std::make_unique<abi::GuestCall>(image,"_ZN21CLevelInterfaceNormal6UpdateEi",0xe4c,
         "_ZN14CWeaponManager9SwitchAimEv",reinterpret_cast<uint32_t>(&normal_switch));
     normal_can_aim_call_=std::make_unique<abi::GuestCall>(image,"_ZN14CWeaponManager9SwitchAimEv",0x40,
@@ -136,8 +147,6 @@ NativeControls::NativeControls(const ElfImage &image, Controls &input, bool deta
     }
     edge_ = std::make_unique<abi::GuestHook>(image,"_ZN7CButton7PressedEv",
         std::initializer_list<uint8_t>{0x55,0x31,0xc0,0x89,0xe5},reinterpret_cast<uint32_t>(&edge_pressed));
-    sweep_ = std::make_unique<abi::GuestHook>(image,"_ZN12CButtonSweep4DrawEi",
-        std::initializer_list<uint8_t>{0x55,0x89,0xe5,0x57,0x56,0x53},reinterpret_cast<uint32_t>(&sweep_draw));
     interaction_draw_ = std::make_unique<abi::GuestHook>(image,"_ZN15PlayerComponent25DrawCustomInteractButtonsEi",
         std::initializer_list<uint8_t>{0x55,0x89,0xe5,0x53,0x83,0xec,0x14},reinterpret_cast<uint32_t>(&interaction_draw));
     player_input_ = std::make_unique<abi::GuestHook>(image,"_ZN15PlayerComponent15UpdateFromInputEi",
@@ -547,6 +556,31 @@ bool NativeControls::draw_scope() const {
     if(target_.kind==TargetKind::bike) return input_.gameplay && live_bike();
     return hud_presentation_.hide_mobile;
 }
+void NativeControls::recover_mount_interaction(uint32_t player, bool on_foot) {
+    uint32_t target=0;
+    if (on_foot && player && read<uint8_t>(player,0x2b9)) {
+        const auto slot=read(player,0x108);
+        if (slot<12 && net::NativeSnapshotPresentation::generation(static_cast<uint8_t>(slot),false))
+            target=read(player,0x1a0);
+    }
+    if (!target || (!invoke(fn("_ZNK11CGameObject12GetComponentEi"),{target,150}) &&
+                    !invoke(fn("_ZNK11CGameObject12GetComponentEi"),{target,160}) &&
+                    !invoke(fn("_ZNK11CGameObject12GetComponentEi"),{target,67}))) {
+        interaction_wait_player_=interaction_wait_target_=0;
+        return;
+    }
+    const auto now=SDL_GetTicks();
+    if (interaction_wait_player_!=player || interaction_wait_target_!=target) {
+        interaction_wait_player_=player; interaction_wait_target_=target; interaction_wait_started_=now;
+    } else if (now-interaction_wait_started_>=2000) {
+        // Native mount requests have no denial packet. Dedicated rejection or
+        // a lost reply must not pin CheckInteract's pending flag indefinitely.
+        // This only releases the native UI; seat authority stays on the server.
+        invoke(fn("_ZN15PlayerComponent10UnInteractEv"),{player});
+        interaction_wait_player_=interaction_wait_target_=0;
+        std::printf("native-mount interaction wait released\n");
+    }
+}
 void NativeControls::refresh() {
     auto app = invoke(fn("_ZN11Application11GetInstanceEv"));
     auto state = app ? invoke(fn("_ZN12gxStateStack12CurrentStateEv"),{app + 0x18738}) : 0;
@@ -569,6 +603,7 @@ void NativeControls::refresh() {
     const bool context = communications_.gameplay_state(state) && normal && read(level,0x178) == normal;
     const bool normal_alive = context && normal_enabled && accepts_input &&
         !invoke_bool(fn("_ZNK11CGameObject6IsDeadEv"),{read(player,4)});
+    recover_mount_interaction(player,normal_alive);
     const bool mech_alive = context && mech_enabled && (accepts_input || enabled(control(second_shoot_control))) &&
         read(mech,4) && read(mech,0x118) && read(mech,0x120) &&
         !invoke_bool(fn("_ZNK11CGameObject6IsDeadEv"),{read(mech,4)});
@@ -599,7 +634,10 @@ void NativeControls::refresh() {
     // Revoke the post-drain normal source before any role can take a frame.
     // Temporary normal disable with the same identity does not retire held input.
     gamepad_.target_observed(level,player,normal,scheme_,mech_enabled || machinegun_enabled || jeep_enabled || bike_enabled);
-    const bool gameplay = bool(next);
+    // A dead player has no actor input target. Keep relative mouse capture for
+    // the active online killcam without admitting movement/fire/weapon actions.
+    const bool death_camera = context && camera::NativeDeathCamera::controllable(player);
+    const bool gameplay = bool(next) || death_camera;
     const bool panel=communications_.is_panel(state) && gameplay;
     const bool panel_transition=(panel || input_.communication_panel()) && gameplay && input_.gameplay &&
         level==level_ && player==player_ && next==target_;
@@ -638,7 +676,16 @@ void NativeControls::refresh() {
         else release_target(target_);
     }
 }
-void NativeControls::begin_frame(uint64_t frame) { normal_aim_lane_.store(GetCurrentThreadId()); bike_writers_.lane=GetCurrentThreadId(); frame_ = frame; observed_ = false; look_pending_ = false; gamepad_.begin_frame(); refresh(); communications_.begin_frame(); }
+void NativeControls::begin_frame(uint64_t frame) {
+    normal_aim_lane_.store(GetCurrentThreadId()); bike_writers_.lane=GetCurrentThreadId();
+    frame_ = frame; observed_ = false; look_pending_ = false;
+    gamepad_.begin_frame(); refresh(); communications_.begin_frame();
+    if (!target_ && input_.pointer_capture() && camera::NativeDeathCamera::controllable(player_)) {
+        const auto motion = input_.take();
+        const auto delta = look_delta(motion.dx, motion.dy, 0, 80, input_.look_config());
+        camera::NativeDeathCamera::rotate(player_, delta.yaw, delta.pitch);
+    }
+}
 void NativeControls::end_frame() {
     communications_.end_frame();
     gamepad_.end_frame();
@@ -670,6 +717,7 @@ void NativeControls::event(uint32_t, uint32_t type, float x, float y) {
     invoke(fn("_ZN12EventManager9raiseSyncERK6IEvent"),{read(event_manager_),reinterpret_cast<uint32_t>(data)});
 }
 void NativeControls::release_actions(uint32_t player) {
+    grenade_gesture_.cancel(); detonate_pending_=false; grenade_gamepad_revision_=0;
     normal_aim_intent_.cancel_input();
     release_normal_owned(fire_,aim_,moving_,[&](uint32_t type) { event(player,type); },
         [&] { return read(player,0x170); },
@@ -685,6 +733,7 @@ void NativeControls::release_event(uint32_t player,uint32_t type) {
         {player+0x10,reinterpret_cast<uint32_t>(data),read(event_manager_)});
 }
 void NativeControls::clear_actions() {
+    grenade_gesture_.cancel(); detonate_pending_=false; grenade_gamepad_revision_=0;
     cancel_normal_aim();
     fire_ = aim_ = moving_ = false;
     bike_actions_ = {};
@@ -1072,11 +1121,28 @@ void NativeControls::apply(uint32_t player) {
             // Original callback above; only a native ADS-startup edge is deferred.
             break;
         case Action::grenade:
-            if (enabled(read(normal_,0x70))) invoke(fn("_Z25HudPressedNoSweepCallbackP15CButtonHudSweep"),{read(normal_,0x70)});
+            // A short click throws on release; a hold feeds the native detonator.
             break;
         case Action::power:
             // The scheme consumes the native Pressed edge and calls its action callback.
+            if(!enabled(control(powers_control)) && enabled(read(normal_,0x5c)) && read<int32_t>(read(normal_,0x5c),0xa0)==0)
+                invoke(fn("_Z22PressedNoSweepCallbackP12CButtonSweep"),{read(normal_,0x5c)});
             break;
+        case Action::previous_power: case Action::next_power: case Action::next_grenade: {
+            const bool hud=a==Action::next_grenade;
+            auto button=hud ? read(normal_,0x70) : control(powers_control);
+            // Online disables the campaign selector; the visible +0x5c sweep
+            // owns consumables instead. Preserve both widgets' native gates.
+            if(!hud && !enabled(button) && enabled(read(normal_,0x5c))) button=read(normal_,0x5c);
+            if(!hud && button==read(normal_,0x5c) && enabled(button)) {
+                animate_power_selection(button,a==Action::previous_power?-1:1);
+                break;
+            }
+            if(enabled(button)) cycle_power_selection(button,hud,a==Action::previous_power ? -1 : 1,
+                fn(hud ? "_ZN15CButtonHudSweep19SetCurrentSelectionEi" : "_ZN12CButtonSweep19SetCurrentSelectionEi"),
+                fn(hud ? "_Z16HudSweepCallbackP15CButtonHudSweepi" : "_Z13SweepCallbackP12CButtonSweepi"));
+            break;
+        }
         case Action::melee: invoke(fn("_ZN15PlayerComponent13UseMeleePowerEv"),{player}); break;
         case Action::interact: invoke(fn("_ZN15PlayerComponent8InteractEv"),{player}); break;
         case Action::next: case Action::previous:
@@ -1120,6 +1186,20 @@ void NativeControls::apply(uint32_t player) {
             break;
         }
     }
+    detonate_pending_=false;
+    if(!input_.active() || !read<uint8_t>(player,0xd)) { grenade_gesture_.cancel();return; }
+    if(!enabled(read(normal_,0x70)) && !enabled(read(normal_,0x68))) { grenade_gesture_.cancel();return; }
+    if(input.edge(Action::grenade))
+        grenade_gamepad_revision_=input.gamepad_edge(Action::grenade) ? input.gamepad_revision : 0;
+    if(grenade_gamepad_revision_ && grenade_gamepad_revision_!=input_.gamepad_revision()) {
+        grenade_gesture_.cancel(); grenade_gamepad_revision_=0; return;
+    }
+    grenade_epoch_=input_.edge_epoch();
+    const auto gesture=grenade_gesture_.sample(input.down(Action::grenade),input.edge(Action::grenade),
+        SDL_GetTicks(),grenade_epoch_);
+    if(gesture==GrenadeCommand::throw_grenade && enabled(read(normal_,0x70)))
+        invoke(fn("_Z25HudPressedNoSweepCallbackP15CButtonHudSweep"),{read(normal_,0x70)});
+    else if(gesture==GrenadeCommand::detonate) detonate_pending_=enabled(read(normal_,0x68));
 }
 void NativeControls::sample(const char *reason) {
     sample_native_controls({image_,player_,normal_,scheme_,
@@ -1142,6 +1222,7 @@ void __cdecl NativeControls::update(uint32_t interface_,uint32_t dt) {
         NormalBoundaryScope scope(boundary);
         jeep_role_input_boundary(s.jeep_role_edge_,[&] { invoke(s.update_->original(),{interface_,dt}); });
     }
+    s.detonate_pending_=false; // An unconsumed gesture expires with this native frame.
     // Reacquire AFTER original input, while the entire-invocation guard still
     // prevents guest reentry during refresh from becoming another outer update.
     s.refresh(); s.sync_normal_aim();
@@ -1442,8 +1523,8 @@ void __cdecl NativeControls::scheme_draw(uint32_t scheme,uint32_t alpha) {
             [&] { invoke(s.scheme_originals_.at(read(scheme)),{scheme,alpha}); });
         return;
     }
-    // Schemes contain touch graphics only. Some joystick draws ignore the
-    // common EnableDraw bit, including the scheme used in the user's MP match.
+    // Some joystick draws ignore EnableDraw, including the scheme used in MP.
+    // Keep their suppression separate from the informative power selector.
     if (s.target_.kind == TargetKind::driver) {
         draw_jeep_scheme(s.draw_scope() && scheme == s.scheme_,(s.target_.driver.capabilities & 2) != 0,
             [&](uint32_t slot) { return s.control(slot); },
@@ -1460,7 +1541,14 @@ void __cdecl NativeControls::scheme_draw(uint32_t scheme,uint32_t alpha) {
             [&] { invoke(s.scheme_originals_.at(read(scheme)),{scheme,alpha}); });
         return;
     }
-    if (hide_scheme_draw(s.draw_scope(),scheme,s.scheme_)) return;
+    if (hide_scheme_draw(s.draw_scope(),scheme,s.scheme_)) {
+        // The original scheme owns this selector's draw. Retain its native
+        // IsEnabled gate and virtual Draw, with the caller's original alpha.
+        const auto power=s.control(powers_control);
+        if (power && invoke_bool(read(read(power),0x84),{power}))
+            invoke(read(read(power),0x6c),{power,alpha});
+        return;
+    }
     invoke(s.scheme_originals_.at(read(scheme)),{scheme,alpha});
 }
 void __cdecl NativeControls::rush_overlay(uint32_t sprite,uint32_t frame,uint32_t x,uint32_t y,
@@ -1510,12 +1598,23 @@ uint32_t __cdecl NativeControls::pressed(uint32_t button) {
 }
 uint32_t __cdecl NativeControls::edge_pressed(uint32_t button) {
     auto &s = *instance_;
+    const auto boundary=normal_input_boundary;
+    // Original normal Update's detonator Pressed query (CALL+0x5f6). Let that
+    // branch own mine use, tutorial completion, MP message and button disable.
+    if(s.detonate_pending_ && s.target_.kind==TargetKind::normal && normal_input_depth==1 &&
+       GetCurrentThreadId()==s.normal_aim_lane_.load() && boundary &&
+       reinterpret_cast<uint32_t>(_ReturnAddress())==s.normal_update_entry_+0x5f9 &&
+       boundary->interface_==s.normal_ && boundary->level==s.level_ && boundary->player==s.player_ &&
+       boundary->state==s.state_ && s.input_.active() && s.input_.edge_epoch()==s.grenade_epoch_ &&
+       read<uint8_t>(s.player_,0xd) && button==read(s.normal_,0x68)) {
+        s.detonate_pending_=false;
+        if(s.enabled(button)) return 1;
+    }
     if(const auto resume=s.communications_.panel_close(button)) return *resume;
     if(s.communications_.press_score(button)) return 1;
     if(s.target_.kind==TargetKind::normal) s.sync_normal_aim();
     if (s.target_.kind==TargetKind::bike) return invoke(s.edge_->original(),{button});
     if (s.target_.kind == TargetKind::driver) {
-        const auto boundary=normal_input_boundary;
         const auto returned=reinterpret_cast<uint32_t>(_ReturnAddress());
         if(jeep_role_query_matches(s.normal_update_entry_,returned,s.jeep_role_edge_.role) && normal_input_depth==1 && GetCurrentThreadId()==s.normal_aim_lane_.load() && boundary &&
            boundary->interface_==s.normal_ && boundary->level==s.level_ && boundary->player==s.player_ &&
@@ -1543,11 +1642,6 @@ uint32_t __cdecl NativeControls::edge_pressed(uint32_t button) {
                 s.frame_input_.edge(action);
     }
     return invoke(s.edge_->original(),{button});
-}
-void __cdecl NativeControls::sweep_draw(uint32_t button,uint32_t alpha) {
-    auto &s = *instance_;
-    if (s.target_.kind != TargetKind::bike && s.target_.kind != TargetKind::driver && !mounted_machinegun(s.target_) && s.draw_scope() && (button == s.control(powers_control) || button == read(s.normal_,0x5c))) return;
-    invoke(s.sweep_->original(),{button,alpha});
 }
 void __cdecl NativeControls::draw(uint32_t interface_) {
     auto &s = *instance_;

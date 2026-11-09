@@ -219,12 +219,21 @@ int main(int argc, char **argv) {
                     "installer long persistence");
             auto config_path = nova::bionic::profile_directory() / "test.conf";
             std::ofstream(config_path)
-                << "# test\nlanguage=ja-JP\nhosts.GLLIVE.GAMELOFT.COM.=127.0.0.1\nobb_directory=obb\ngraphics_backend=vulkan\n";
+                << "# test\nlanguage=ja-JP\nobb_directory=obb\ngraphics_backend=vulkan\n";
             std::filesystem::path obb;
             auto parsed = nova::profile::read_config(config_path, obb);
-            require(parsed.language == "ja-JP" && parsed.hosts.at("gllive.gameloft.com") == "127.0.0.1",
-                    "config and host normalization");
+            require(parsed.language == "ja-JP", "public language configuration");
             require(obb == config_path.parent_path() / "obb", "relative config path");
+            std::filesystem::path diagnostic_obb;
+            std::ofstream(config_path, std::ios::app) << "hosts.GLLIVE.GAMELOFT.COM.=127.0.0.1\n";
+#if defined(NOVA_DEVELOPER_INTERFACE)
+            require(nova::profile::read_config(config_path, diagnostic_obb).hosts.at("gllive.gameloft.com") == "127.0.0.1", "Debug host normalization");
+#else
+            bool rejected_hosts = false;
+            try { nova::profile::read_config(config_path, diagnostic_obb); }
+            catch (const std::exception &) { rejected_hosts = true; }
+            require(rejected_hosts, "Release rejects diagnostic host overrides");
+#endif
             require(parsed.graphics_backend == "vulkan", "graphics backend config");
             nova::bionic::map_path("/data/data/com.gameloft.android.ANMP.GloftN3HM/files/CaseName");
             nova::bionic::map_path("/data/data/com.gameloft.android.ANMP.GloftN3HM/files/casename");

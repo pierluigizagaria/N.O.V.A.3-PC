@@ -3,7 +3,8 @@
 #include <memory>
 #include <cstdint>
 namespace nova::ui {
-// Canonical logical sprite/font metrics, independent of startup resolution.
+// 720p logical metrics for the two HUD sprite families, independent of startup
+// resolution. Shared menu assets, fonts and weapon overlays stay native.
 // Artwork density remains owned by NativeArtwork.
 class NativePixelResources {
 public:

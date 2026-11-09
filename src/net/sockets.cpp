@@ -1,5 +1,7 @@
 #include "net/network.h"
 #include "net/interfaces.h"
+#include "net/community_lobby.h"
+#include "net/community_match.h"
 #include "platform/profile.h"
 #include <algorithm>
 #include <chrono>
@@ -122,6 +124,9 @@ int __cdecl connect_socket(int fd, const void *address, uint32_t size) {
     int length = 0;
     if (!to_host_address(address, size, host, length))
         return -1;
+    try {
+        CommunityLobby::attach(d,reinterpret_cast<sockaddr *>(&host),length);
+    } catch (...) { return fail(12); }
     int rc = ::connect(d->socket, reinterpret_cast<sockaddr *>(&host), length);
     if (rc != SOCKET_ERROR)
         return rc;
@@ -152,6 +157,9 @@ int __cdecl send_to(int fd, const void *bytes, uint32_t size, int flags, const v
     int host_length = 0;
     if (!to_host_address(address, length, host, host_length))
         return -1;
+    if (auto wrapped = CommunityMatch::send(d, bytes, size, flags,
+            reinterpret_cast<sockaddr *>(&host), host_length))
+        return *wrapped;
     int n = io_result(::sendto(d->socket, static_cast<const char *>(bytes), static_cast<int>(size), f,
                                reinterpret_cast<sockaddr *>(&host), host_length));
     if (n >= 0)
@@ -171,6 +179,11 @@ int __cdecl receive_from(int fd, void *bytes, uint32_t size, int flags, void *ad
         return -1;
     sockaddr_storage host{};
     int host_length = sizeof host;
+    if (auto wrapped = CommunityMatch::receive(d, bytes, size, flags, host, host_length)) {
+        if (*wrapped >= 0 && address)
+            from_host_address(reinterpret_cast<sockaddr *>(&host), host_length, address, length);
+        return *wrapped;
+    }
     int n = ::recvfrom(d->socket, static_cast<char *>(bytes), static_cast<int>(size), f,
                        reinterpret_cast<sockaddr *>(&host), &host_length);
     // Linux returns the copied prefix for a short UDP receive, without EMSGSIZE.
@@ -370,6 +383,8 @@ int __cdecl poll_sockets(PollFd *fds, uint32_t count, int timeout) {
     std::vector<std::shared_ptr<Descriptor>> held(count);
     std::vector<WSAPOLLFD> sockets;
     std::vector<uint32_t> indices;
+    std::vector<std::optional<CommunityLobby::PollPlan>> plans;
+    bool buffered = false;
     int saved_errno = bionic::guest_errno;
     int ready = 0;
     for (uint32_t i = 0; i < count; ++i) {
@@ -391,7 +406,20 @@ int __cdecl poll_sockets(PollFd *fds, uint32_t count, int timeout) {
             // Microsoft Winsock rejects POLLPRI; use select for OOB below.
             if (p.events & (4 | 256))
                 events |= POLLWRNORM;
-            sockets.push_back({d->socket, events, 0});
+            auto plan=CommunityLobby::poll(d,events);
+            if (events & POLLRDNORM) {
+                if (auto native = CommunityLobby::readable(d)) {
+                    if (*native != 0) buffered = true;
+                    if (plan) plan->immediate &= ~POLLRDNORM;
+                }
+                if (auto native = CommunityMatch::readable(d)) {
+                    if (*native == 1) buffered = true;
+                    if (*native == -2) events &= ~POLLRDNORM;
+                }
+            }
+            if(plan && plan->immediate)buffered=true;
+            sockets.push_back({d->socket, plan?plan->events:events, 0});
+            plans.push_back(plan);
             indices.push_back(i);
         } else {
             // Regular files are always ready, including EOF, as on Linux.
@@ -403,7 +431,7 @@ int __cdecl poll_sockets(PollFd *fds, uint32_t count, int timeout) {
     bionic::guest_errno = saved_errno;
     auto deadline = GetTickCount64() + (timeout < 0 ? 0 : static_cast<uint64_t>(timeout));
     for (;;) {
-        int wait = ready ? 0
+        int wait = (ready || buffered) ? 0
                    : timeout < 0
                        ? 50
                        : static_cast<int>((std::min)(uint64_t(50), deadline > GetTickCount64()
@@ -436,7 +464,30 @@ int __cdecl poll_sockets(PollFd *fds, uint32_t count, int timeout) {
             }
             for (size_t j = 0; j < sockets.size(); ++j) {
                 auto bits = sockets[j].revents;
+                if(plans[j]) {
+                    bits|=plans[j]->immediate;
+                    if(plans[j]->retry) {
+                        const bool retry_ready=(bits&plans[j]->retry)!=0;
+                        // TLS handshake traffic wakes the pending writer, not
+                        // native readers waiting for an HTTP/lobby response.
+                        bits&=~(POLLRDNORM|POLLWRNORM);
+                        if(retry_ready)bits|=POLLWRNORM;
+                    }
+                }
                 auto &p = fds[indices[j]];
+                if (p.events & (1 | 64)) {
+                    if (auto native = CommunityLobby::readable(held[indices[j]])) {
+                        bits &= ~POLLRDNORM;
+                        if (*native == 1) bits |= POLLRDNORM;
+                        else if (*native < 0) bits |= POLLERR;
+                    }
+                    if (auto native = CommunityMatch::readable(held[indices[j]])) {
+                        bits &= ~POLLRDNORM;
+                        if (*native == 1) bits |= POLLRDNORM;
+                        else if (*native == -2) sockets[j].events &= ~POLLRDNORM;
+                        else if (*native < 0) bits |= POLLERR;
+                    }
+                }
                 short translated = 0;
                 if (bits & POLLRDNORM)
                     translated |= p.events & (1 | 64);
@@ -671,6 +722,13 @@ int read_socket(const std::shared_ptr<Descriptor> &d, void *bytes, uint32_t size
     int f = message_flags(flags);
     if (f < 0)
         return -1;
+    if(auto secured=CommunityLobby::read(d,bytes,size,flags))return *secured;
+    if (d->type == SOCK_DGRAM) {
+        sockaddr_storage peer{};
+        int length = sizeof(peer);
+        if (auto secured = CommunityMatch::receive(d, bytes, size, flags, peer, length))
+            return *secured;
+    }
     int n = ::recv(d->socket, static_cast<char *>(bytes), static_cast<int>(size), f);
     if (n == SOCKET_ERROR && WSAGetLastError() == WSAEMSGSIZE && d->type == SOCK_DGRAM)
         n = static_cast<int>(size);
@@ -686,6 +744,15 @@ int write_socket(const std::shared_ptr<Descriptor> &d, const void *bytes, uint32
     int f = message_flags(flags);
     if (f < 0)
         return -1;
+    if(auto secured=CommunityLobby::write(d,bytes,size,flags))return *secured;
+    if (d->type == SOCK_DGRAM) {
+        sockaddr_storage peer{};
+        int length = sizeof(peer);
+        const bool connected = ::getpeername(d->socket, reinterpret_cast<sockaddr *>(&peer), &length) == 0;
+        if (auto secured = CommunityMatch::send(d, bytes, size, flags,
+                connected ? reinterpret_cast<sockaddr *>(&peer) : nullptr, connected ? length : 0))
+            return *secured;
+    }
     int n = io_result(::send(d->socket, static_cast<const char *>(bytes), static_cast<int>(size), f));
     if (n >= 0)
         traffic(*d, "send", bytes, n);

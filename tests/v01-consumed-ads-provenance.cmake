@@ -6,8 +6,8 @@ if(NOVA_REAL_TESTS AND (CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "
   target_compile_options(weapon-consumed-ads-provenance-tests PRIVATE /W4 /WX /EHsc)
   add_test(NAME weapon-consumed-ads-provenance-original
     COMMAND weapon-consumed-ads-provenance-tests "${PROJECT_SOURCE_DIR}/local/input/lib/x86/libNOVA3_neon.so"
-      "${PROJECT_SOURCE_DIR}/local/work/o08-wobble/locomotion-pose/resource"
-      "${PROJECT_SOURCE_DIR}/local/work/v01-weapon-position/consumed-ads-provenance/resource"
+      "${PROJECT_SOURCE_DIR}/local/fixtures/movement/locomotion-pose"
+      "${PROJECT_SOURCE_DIR}/local/fixtures/movement/ads-provenance"
     CONFIGURATIONS Release)
   set_tests_properties(weapon-consumed-ads-provenance-original PROPERTIES
     SKIP_RETURN_CODE 77 LABELS "real;opt-in;V01g" TIMEOUT 20)

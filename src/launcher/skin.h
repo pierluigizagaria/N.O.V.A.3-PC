@@ -17,6 +17,7 @@ struct SkinState {
     bool processing=false,apk_ready=false,data_ready=false,want_data=false;
     bool error=false,retry=false,drop_hover=false,focus_cues=true;
     int focused=0,hover=0,pressed=0;
+    bool operator==(const SkinState &) const = default;
 };
 // Logical client coordinates on an 800x540 canvas; native Windows owns the title bar.
 inline constexpr int canvas_width=800,canvas_height=540;
@@ -37,6 +38,7 @@ public:
     bool complete() const;
     HICON icon() const;
     void draw(HDC,int width,int height,const SkinState &,int offset_x=0,int offset_y=0);
+    void draw_control(HDC,int width,int height,const SkinState &,POINT origin,const RECT &bounds);
     void preview(const std::filesystem::path &,const SkinState &,int width=canvas_width,int height=canvas_height);
     std::string audit() const;
 private:

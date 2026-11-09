@@ -11,16 +11,38 @@ set(CMAKE_CXX_STANDARD 20)
 add_compile_options($<$<CONFIG:Release>:/Z7>)
 add_link_options($<$<CONFIG:Release>:/DEBUG>)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_compile_definitions($<$<CONFIG:Debug>:NOVA_DEVELOPER_INTERFACE=1>)
+add_library(nova_connection STATIC src/net/server_config.cpp)
+target_include_directories(nova_connection PUBLIC src)
+target_compile_options(nova_connection PRIVATE /W4 /WX /EHsc)
+target_link_libraries(nova_connection PUBLIC ws2_32)
+target_compile_definitions(nova_connection PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
 add_library(nova_runtime STATIC
   src/jni/runtime.cpp
   src/java/boot.cpp
   src/platform/profile.cpp
   src/camera/world_fov.cpp
+  src/camera/native_death_camera.cpp
   src/net/sockets.cpp
   src/net/interfaces.cpp
   src/net/interfaces_windows.cpp
   src/net/resolver.cpp
+  src/net/local_shop.cpp
+  src/net/native_trust.cpp
+  src/net/native_server_tls.cpp
+  src/net/community_lobby.cpp
+  src/net/social_invitations.cpp
+  src/net/native_friends_refresh.cpp
+  src/net/community_match.cpp
+  src/net/native_snapshot_presentation.cpp
+  src/net/native_consumables.cpp
+  src/net/server_certificate.cpp
+  src/net/tls_stream.cpp
+  src/net/secure_datagram.cpp
+  src/net/native_session_trace.cpp
+  src/net/native_save_trace.cpp
   src/loader/report.cpp
+  src/loader/sha256.cpp
   src/abi/guest_call.cpp
   src/abi/guest_hook.cpp
   src/abi/guest_jump.cpp
@@ -41,7 +63,7 @@ add_library(nova_runtime STATIC
   src/bionic/pthread.cpp
   src/bionic/wchar.cpp
   src/bionic/time.cpp)
-target_link_libraries(nova_runtime PUBLIC synchronization bcrypt ws2_32 iphlpapi)
+target_link_libraries(nova_runtime PUBLIC nova_connection synchronization bcrypt ws2_32 iphlpapi winhttp crypt32 secur32)
 # Android x86 ELF frames do not probe Windows guard pages. Keep the existing
 # nominal reserve and commit its budget for every executable entering guest code.
 target_link_options(nova_runtime INTERFACE "/STACK:1048576,1048576")
@@ -92,7 +114,8 @@ target_link_libraries(nova_media PUBLIC nova_runtime SDL3::SDL3
   imgui::imgui
   unofficial::angle::libEGL unofficial::angle::libGLESv2 windowscodecs ole32)
 target_compile_options(nova_media PRIVATE /W4 /WX /EHsc)
-add_executable(nova3pc src/play.cpp)
+add_executable(nova3pc WIN32 src/play.cpp src/platform/game_entry.cpp)
+target_sources(nova_media PRIVATE src/platform/native_logo.cpp)
 
 # First-run UI and importer are host-only; no guest library is loaded here.
 find_package(ZLIB REQUIRED)

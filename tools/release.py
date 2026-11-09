@@ -28,6 +28,21 @@ ARTWORK = ROOT / 'local/launcher'
 APK_ICON = 'res/drawable-xxhdpi/icon.png'
 
 
+def branding(directory=ARTWORK, fallback=ROOT / 'assets/branding', with_logos=True):
+    """Use complete approved branding; never silently publish a plain-title build."""
+    directory, fallback = Path(directory), Path(fallback)
+    background = next((folder / 'background-a.png' for folder in (directory, fallback)
+                       if (folder / 'background-a.png').is_file()), None)
+    logos = None
+    if with_logos:
+        logos = next((folder for folder in (directory, fallback)
+                      if all((folder / name).is_file() for name in package_release.LOGOS)), None)
+        if logos is None:
+            raise SystemExit('release: missing original logo/icon; restore approved assets/branding '
+                             'or explicitly select --no-logos.')
+    return background, logos
+
+
 def step(message):
     print(f'\n==> {message}', flush=True)
 
@@ -53,8 +68,7 @@ def import_icon(apk):
     if target.is_file():
         return
     if not apk:
-        print('note: local/launcher/icon.png is missing; executables get no icon. '
-              'Pass --apk or run the launcher setup once.')
+        print('note: local icon is missing; checking approved release branding next.')
         return
     with zipfile.ZipFile(apk) as archive:
         try:
@@ -82,11 +96,15 @@ def main():
 
     step('Artwork')
     import_icon(args.apk)
+    background, logos = branding(with_logos=not args.no_logos)
     cmake = find_cmake()
     ctest = str(Path(cmake).with_name('ctest.exe' if os.name == 'nt' else 'ctest'))
 
     step('Configure (x86, clang-cl, vcpkg)')
-    run(cmake, '--preset', 'win32')
+    icon = ARTWORK / 'icon.png'
+    if not icon.is_file() and logos:
+        icon = logos / 'icon.png'
+    run(cmake, '--preset', 'win32', *([f'-DNOVA_ICON_SOURCE={icon}'] if icon.is_file() else []))
     step('Build Release')
     targets = [] if args.test else ['--target', 'nova3pc', 'nova3pc-launcher']
     run(cmake, '--build', '--preset', 'release', *targets)
@@ -95,16 +113,9 @@ def main():
         run(ctest, '--preset', 'release', '-R', 'launcher')
 
     step('Package')
-    background = ARTWORK / 'background-a.png'
-    logos = None
-    if not args.no_logos:
-        if all((ARTWORK / name).is_file() for name in package_release.LOGOS):
-            logos = ARTWORK
-        else:
-            print('note: original logo/icon not in local/launcher; packaging without them.')
     target, archive = package_release.package(
         ROOT / 'build/win32/Release', args.output, 'N.O.V.A.3-PC',
-        background if background.is_file() else None, not args.no_zip, logos)
+        background, not args.no_zip, logos)
     print(f'\nDone: {target}' + (f'\n      {archive}' if archive else ''))
 
 

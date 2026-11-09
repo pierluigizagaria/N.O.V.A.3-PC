@@ -1,4 +1,6 @@
+#include "platform/build_interface.h"
 #include "camera/native_world_fov.h"
+#include "camera/native_death_camera.h"
 #include "abi/guest_call.h"
 #include "weapon_placement/native_rigid_draw_binding.h"
 #include "movement_wobble/native_camera_bob.h"
@@ -358,7 +360,7 @@ void NativeWorldFov::world_rejected(const char *leaf,uint32_t p,const Node &n,st
 }
 void NativeWorldFov::weapon_observed(const char *leaf) {
     // Explicit diagnostic only: bounded distinct reasons, no periodic hot-path log.
-    static const bool trace=std::getenv("NOVA_TRACE_VIEWMODEL")!=nullptr;
+    static const bool trace=(nova::build_interface::developer ? std::getenv("NOVA_TRACE_VIEWMODEL") : nullptr)!=nullptr;
     if(trace) {
         static thread_local std::array<const char *,16> seen{};
         for(auto &entry:seen) {
@@ -1638,6 +1640,7 @@ void __cdecl NativeWorldFov::ctor2(uint32_t p,uint32_t vtt,uint32_t db,uint32_t 
     auto &s=*instance_; CallbackScope callback(s); s.publish(p); invoke(s.original_ctor2_,{p,vtt,db,camera});
 }
 void __cdecl NativeWorldFov::dtor(uint32_t p,uint32_t vtt) {
+    NativeDeathCamera::forget(p);
     auto &s=*instance_; CallbackScope callback(s); s.publish(p); invoke(s.original_dtor_,{p,vtt});
 }
 void __cdecl NativeWorldFov::enable(uint32_t component,uint32_t value) {

@@ -16,7 +16,7 @@ function Read-Pixels($image) {
     return ,$pixels
 }
 
-# Use the owner's exact raster attachment; only proportional placement is applied.
+# Place the owner's raster with the authorized rim-only finish edit proportionally.
 $raster=[System.Drawing.Bitmap]::new((Join-Path $branding 'pc-raster.png'))
 $canvas=[System.Drawing.Bitmap]::new(2000,470,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $g=[System.Drawing.Graphics]::FromImage($canvas)
